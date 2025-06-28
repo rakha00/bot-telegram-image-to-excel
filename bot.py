@@ -11,9 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from telegram.constants import ParseMode
 import importlib.util
 import sys
-import time
 import ollama_vision_extractor # Menggunakan ekstraktor berbasis Ollama
-from helpers import ensure_safe_html_for_pre
 
 # Muat environment variables dari .env file
 load_dotenv()
@@ -58,50 +56,35 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         process_image_in_background(context, chat_id, temp_image_path, status_message.message_id)
     )
 
-async def stream_and_update_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, image_path: str):
-    """Memperbarui pesan secara real-time dengan skrip yang di-stream dari AI."""
-    full_script = ""
-    last_sent_text = ""
-    last_update_time = time.time()
-    update_interval = 1.0  # Detik
-
-    initial_text = "⏳ AI sedang membuat skrip...\n\n<pre></pre>"
-    await context.bot.edit_message_text(text=initial_text, chat_id=chat_id, message_id=message_id, parse_mode=ParseMode.HTML)
-    last_sent_text = initial_text
-
-    async for chunk in ollama_vision_extractor.stream_excel_script(image_path):
-        full_script += chunk
-        current_time = time.time()
-        if current_time - last_update_time > update_interval:
-            try:
-                safe_content = ensure_safe_html_for_pre(full_script)
-                new_text = f"⏳ AI sedang membuat skrip...\n\n<pre>{safe_content}</pre>"
-                
-                if new_text != last_sent_text:
-                    await context.bot.edit_message_text(text=new_text, chat_id=chat_id, message_id=message_id, parse_mode=ParseMode.HTML)
-                    last_sent_text = new_text
-                last_update_time = current_time
-            except Exception as e:
-                if "Message is not modified" not in str(e):
-                    logger.warning(f"Gagal memperbarui pesan streaming: {e}")
-    
-    # Pembaruan final untuk memastikan skrip yang lengkap dan bersih ditampilkan
-    safe_final_script = ensure_safe_html_for_pre(full_script)
-    final_text = f"⏳ AI sedang membuat skrip...\n\n<pre>{safe_final_script}</pre>"
-    if final_text != last_sent_text:
-        await context.bot.edit_message_text(text=final_text, chat_id=chat_id, message_id=message_id, parse_mode=ParseMode.HTML)
-    
-    return full_script
-
 async def process_image_in_background(context: ContextTypes.DEFAULT_TYPE, chat_id: int, temp_image_path: str, message_id: int):
-    """Fungsi yang berjalan di latar belakang untuk memproses gambar dengan pembaruan status real-time."""
+    """Fungsi yang berjalan di latar belakang untuk memproses gambar dengan pembaruan status di terminal."""
     output_excel_path = None
     temp_script_path = None
 
     try:
-        script_code = await stream_and_update_message(context, chat_id, message_id, temp_image_path)
+        await context.bot.edit_message_text(
+            text="⏳ Gambar diterima. AI sedang menganalisis gambar secara mendalam...",
+            chat_id=chat_id,
+            message_id=message_id
+        )
+        
+        # Akumulasi skrip dari stream sambil mencetaknya ke terminal
+        script_code = ""
+        stream_started = False
+        print("\n--- Menunggu Stream dari AI ---")
+        async for chunk in ollama_vision_extractor.stream_excel_script(temp_image_path):
+            if not stream_started:
+                print("\n--- Streaming Dimulai ---")
+                await context.bot.edit_message_text(
+                    text="✅ Analisis selesai. AI sekarang membuat skrip Anda.",
+                    chat_id=chat_id,
+                    message_id=message_id
+                )
+                stream_started = True
+            script_code += chunk
+        print("\n--- Streaming Selesai ---")
 
-        if not script_code:
+        if not script_code.strip():
             await context.bot.edit_message_text(
                 text="⚠️ Analisis selesai. Maaf, AI tidak dapat menghasilkan skrip untuk gambar ini.",
                 chat_id=chat_id,
