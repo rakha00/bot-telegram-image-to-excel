@@ -106,18 +106,14 @@ async def process_image_in_background(context: ContextTypes.DEFAULT_TYPE, chat_i
             message_id=message_id,
         )
 
-        # Pisahkan dataframes dan analisis
+        # Pisahkan dataframes
         dataframes = [res[0] for res in results]
-        analyses = [f"Analisis Tabel {i+1}:\n{res[1]}" for i, res in enumerate(results)]
-        
-        # Gabungkan semua analisis menjadi satu teks ringkasan
-        summary_text = "\n\n".join(analyses)
 
         # Buat file Excel
         file_id = os.path.basename(temp_image_path).split('.')[0]
         output_excel_path = os.path.join("output", f"{file_id}_hasil.xlsx")
         
-        excel_generator.create_excel_file(dataframes, summary_text, output_excel_path)
+        excel_generator.create_excel_file(dataframes, output_excel_path)
         logger.info(f"File Excel dibuat di: {output_excel_path}")
 
         # Kirim file Excel
@@ -127,14 +123,6 @@ async def process_image_in_background(context: ContextTypes.DEFAULT_TYPE, chat_i
             filename=os.path.basename(output_excel_path),
             caption="Berikut adalah file Excel dengan data yang diekstrak."
         )
-        
-        # Kirim ringkasan analisis sebagai pesan teks terpisah
-        if summary_text:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"<b>Ringkasan Analisis:</b>\n\n{summary_text}",
-                parse_mode=ParseMode.HTML
-            )
 
     except Exception as e:
         indicator_task.cancel()
