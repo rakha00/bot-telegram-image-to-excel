@@ -10,7 +10,7 @@ File ini akan berisi fungsi untuk:
 """
 
 import pandas as pd
-from typing import List, Dict
+from typing import List
 
 def create_excel_file(
     dataframes: List[pd.DataFrame],

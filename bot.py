@@ -1,6 +1,6 @@
 """
 Modul utama untuk Bot Telegram Konversi Gambar ke Excel.
-Arsitektur baru menggunakan 'img2table' untuk ekstraksi lokal yang andal.
+Arsitektur ini menggunakan AI untuk ekstraksi JSON, dan Python untuk pembuatan Excel.
 """
 import logging
 import os
@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from telegram.constants import ParseMode
 
 import excel_generator
-import table_extractor # Modul baru yang menggunakan 'img2table'
+import ollama_vision_extractor # Menggunakan ekstraktor berbasis Ollama
 
 # Muat environment variables dari .env file
 load_dotenv()
@@ -31,7 +31,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Mengirim pesan ketika perintah /start dijalankan."""
     user = update.effective_user
     await update.message.reply_html(
-        rf"Halo {user.mention_html()}! Kirimkan gambar tabel. Saya akan mengekstraknya menjadi file Excel menggunakan pemrosesan lokal yang canggih.",
+        rf"Halo {user.mention_html()}! Kirimkan gambar tabel. Saya akan menggunakan AI (LLaVA) untuk mengekstrak data dan membuat file Excel.",
     )
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -45,63 +45,118 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await photo_file.download_to_drive(temp_image_path)
     logger.info(f"Gambar disimpan di: {temp_image_path}")
 
-    # Kirim pesan konfirmasi instan
-    await context.bot.send_message(
+    # Kirim pesan konfirmasi instan yang akan kita edit nanti
+    status_message = await context.bot.send_message(
         chat_id=chat_id,
-        text="✅ Gambar diterima. Memulai analisis lokal di latar belakang. "
-             "Proses ini bisa memakan waktu, terutama saat pertama kali. "
-             "Saya akan mengirimkan file Excel jika sudah selesai."
+        text="✅ Gambar diterima. Memulai analisis..."
     )
 
     # Jalankan proses yang berat di thread terpisah untuk tidak memblokir bot
     context.application.create_task(
-        process_image_in_background(context, chat_id, temp_image_path)
+        process_image_in_background(context, chat_id, temp_image_path, status_message.message_id)
     )
 
-async def process_image_in_background(context: ContextTypes.DEFAULT_TYPE, chat_id: int, temp_image_path: str):
-    """Fungsi yang berjalan di latar belakang untuk memproses gambar."""
-    output_excel_path = None
+async def update_status_indicator(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int):
+    """Mengedit pesan untuk menunjukkan bahwa bot sedang bekerja."""
+    indicators = ["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"]
+    i = 0
+    while True:
+        try:
+            await context.bot.edit_message_text(
+                text=f"Analisis sedang berlangsung... {indicators[i % len(indicators)]}",
+                chat_id=chat_id,
+                message_id=message_id
+            )
+            i += 1
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"Tidak dapat mengedit pesan status: {e}")
+            break
+
+async def process_image_in_background(context: ContextTypes.DEFAULT_TYPE, chat_id: int, temp_image_path: str, message_id: int):
+    """Fungsi yang berjalan di latar belakang untuk memproses gambar dengan indikator status."""
+    output_excel_path = None  # Tetap ada untuk logika pembersihan
+    indicator_task = context.application.create_task(
+        update_status_indicator(context, chat_id, message_id)
+    )
+
     try:
         logger.info(f"Memulai pemrosesan latar belakang untuk: {temp_image_path}")
         
-        # Jalankan fungsi ekstraksi lokal yang memblokir di thread terpisah
-        dataframes = await asyncio.to_thread(
-            table_extractor.extract_tables_from_image_local,
-            temp_image_path
-        )
+        # Menggunakan model qwen2.5vl:latest secara eksplisit
+        results = await ollama_vision_extractor.extract_tables_with_ollama(temp_image_path, model_name='qwen2.5vl:latest')
 
-        if not dataframes:
-            await context.bot.send_message(chat_id=chat_id, text="Analisis selesai. Maaf, tidak ada tabel yang dapat diekstrak dari gambar ini.")
+        indicator_task.cancel()
+        await asyncio.sleep(0.1)  # Beri waktu untuk pembatalan
+
+        if not results:
+            await context.bot.edit_message_text(
+                text="Analisis selesai. Maaf, tidak ada tabel yang dapat diekstrak.",
+                chat_id=chat_id,
+                message_id=message_id
+            )
             return
 
-        logger.info(f"Berhasil mengekstrak {len(dataframes)} tabel.")
-        await context.bot.send_message(chat_id=chat_id, text=f"Analisis selesai! Menyusun {len(dataframes)} tabel yang ditemukan ke dalam file Excel...")
-
-        output_excel_path = os.path.join("output", f"hasil_{os.path.basename(temp_image_path).split('.')[0]}.xlsx")
-        # Untuk img2table, kita tidak punya teks ringkasan terpisah, jadi kita kirim string kosong
-        final_excel_path = excel_generator.create_excel_file(
-            dataframes=dataframes,
-            summary_text="", 
-            output_path=output_excel_path
+        logger.info(f"Berhasil mengekstrak {len(results)} tabel. Membuat file Excel...")
+        await context.bot.edit_message_text(
+            text=f"✅ Analisis selesai! Ditemukan {len(results)} tabel. Membuat file Excel...",
+            chat_id=chat_id,
+            message_id=message_id,
         )
 
-        if final_excel_path:
-            logger.info(f"File Excel berhasil dibuat di: {final_excel_path}")
-            await context.bot.send_message(chat_id=chat_id, text="Selesai! Ini dia file Excel hasil rekonstruksi.")
-            await context.bot.send_document(chat_id=chat_id, document=open(final_excel_path, 'rb'))
-        else:
-            await context.bot.send_message(chat_id=chat_id, text="Maaf, tidak dapat membuat file Excel. Mungkin tidak ada tabel yang valid ditemukan.")
+        # Pisahkan dataframes dan analisis
+        dataframes = [res[0] for res in results]
+        analyses = [f"Analisis Tabel {i+1}:\n{res[1]}" for i, res in enumerate(results)]
+        
+        # Gabungkan semua analisis menjadi satu teks ringkasan
+        summary_text = "\n\n".join(analyses)
+
+        # Buat file Excel
+        file_id = os.path.basename(temp_image_path).split('.')[0]
+        output_excel_path = os.path.join("output", f"{file_id}_hasil.xlsx")
+        
+        excel_generator.create_excel_file(dataframes, summary_text, output_excel_path)
+        logger.info(f"File Excel dibuat di: {output_excel_path}")
+
+        # Kirim file Excel
+        await context.bot.send_document(
+            chat_id=chat_id,
+            document=open(output_excel_path, 'rb'),
+            filename=os.path.basename(output_excel_path),
+            caption="Berikut adalah file Excel dengan data yang diekstrak."
+        )
+        
+        # Kirim ringkasan analisis sebagai pesan teks terpisah
+        if summary_text:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"<b>Ringkasan Analisis:</b>\n\n{summary_text}",
+                parse_mode=ParseMode.HTML
+            )
 
     except Exception as e:
+        indicator_task.cancel()
+        await asyncio.sleep(0.1)
         logger.error(f"Terjadi kesalahan besar dalam alur kerja latar belakang: {e}", exc_info=True)
-        await context.bot.send_message(chat_id=chat_id, text=f"Maaf, terjadi kesalahan yang tidak terduga saat memproses gambar: {e}")
+        await context.bot.edit_message_text(
+            text=f"❌ Maaf, terjadi kesalahan saat memproses gambar: {e}",
+            chat_id=chat_id,
+            message_id=message_id
+        )
     finally:
-        # Hapus semua file sementara
-        files_to_delete = [temp_image_path, output_excel_path]
-        for file_path in files_to_delete:
-            if file_path and os.path.exists(file_path):
-                os.remove(file_path)
-                logger.info(f"File sementara dihapus: {file_path}")
+        if not indicator_task.done():
+            indicator_task.cancel()
+        
+        # Hapus file gambar dan excel sementara
+        if os.path.exists(temp_image_path):
+            os.remove(temp_image_path)
+            logger.info(f"File gambar sementara dihapus: {temp_image_path}")
+        if output_excel_path and os.path.exists(output_excel_path):
+            os.remove(output_excel_path)
+            logger.info(f"File Excel sementara dihapus: {output_excel_path}")
+
 
 def main() -> None:
     """Memulai dan menjalankan bot."""

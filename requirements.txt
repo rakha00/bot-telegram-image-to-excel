@@ -8,3 +8,5 @@ img2table
 easyocr
 torch
 torchvision
+# Library untuk Ollama
+ollama
