@@ -18,13 +18,22 @@ def extract_tables_from_image_local(image_path: str) -> list[pd.DataFrame]:
     try:
         # Inisialisasi OCR engine (EasyOCR)
         # Kita bisa menentukan bahasa di sini jika diperlukan
-        ocr = EasyOCR(lang=["en", "id"])
+        # Menambahkan ocr_params untuk menyempurnakan EasyOCR
+        # - text_threshold: Menurunkan ambang kepercayaan untuk mendeteksi teks yang kurang jelas.
+        # - low_text: Menurunkan ambang untuk teks dengan skor rendah, membantu menangkap karakter kecil.
+        # - contrast_ths dan adjust_contrast: Sedikit menyesuaikan kontras untuk kejelasan.
+        ocr_params = {
+            "text_threshold": 0.3,
+            "low_text": 0.3,
+            "adjust_contrast": 0.7,
+            "contrast_ths": 0.3
+        }
+        ocr = EasyOCR(lang=["en", "id"], ocr_params=ocr_params)
 
         # Buat objek dokumen dari gambar
         doc = Image(src=image_path)
 
-        # Ekstrak tabel
-        # implicit_rows=True sangat penting untuk tabel tanpa garis horizontal yang jelas
+        # Ekstrak tabel dengan parameter OCR yang telah disempurnakan
         extracted_tables = doc.extract_tables(ocr=ocr,
                                               implicit_rows=True,
                                               borderless_tables=True)
