@@ -16,29 +16,41 @@ def get_image_base64(image_path: str) -> str:
 def generate_ollama_prompt():
     """Membangun prompt instruksi untuk ekstraksi dan analisis tabel."""
     return """
-    Analisis gambar yang diberikan dengan saksama.
-    Tugas Anda adalah mendeteksi SEMUA tabel yang ada di dalam gambar, mengekstrak datanya, DAN memberikan analisis singkat untuk setiap tabel.
+    Analisis gambar yang diberikan dengan saksama. Fokus utama Anda adalah pada **ekstraksi tabel yang akurat dan lengkap**, terutama untuk dokumen keuangan yang kompleks seperti neraca atau laporan laba rugi.
 
-    Format output Anda HARUS berupa JSON dengan struktur berikut:
-    - Sebuah list utama yang berisi semua tabel yang ditemukan.
-    - Setiap elemen dalam list adalah sebuah objek yang mewakili satu tabel.
-    - Setiap objek tabel memiliki DUA kunci: "analysis" dan "data".
-    - Nilai dari "analysis" adalah sebuah string teks yang berisi ringkasan atau wawasan dari data tabel.
-    - Nilai dari "data" adalah sebuah list dari list, di mana setiap list dalam merepresentasikan satu baris dalam tabel. Baris pertama HARUS menjadi header.
+    Tugas Anda adalah:
+    1.  **Deteksi dan Ekstrak SEMUA Tabel**: Identifikasi setiap tabel dalam gambar.
+    2.  **Tangani Struktur Kompleks**: Berikan perhatian khusus pada:
+        *   **Header Multi-Level**: Kenali jika sebuah kolom memiliki beberapa tingkat header (misalnya, 'Neraca Saldo' yang memiliki sub-kolom 'Debit' dan 'Kredit').
+        *   **Baris Hirarkis**: Pahami baris yang merupakan kategori utama (misalnya, 'ASET LANCAR') dan sub-barisnya (misalnya, 'Kas', 'Piutang'). Pertahankan struktur ini.
+        *   **Sel yang Digabung (Merged Cells)**: Interpretasikan sel yang digabung dengan benar, baik secara horizontal maupun vertikal.
+        *   **Baris Total dan Subtotal**: Identifikasi baris yang berisi total atau subtotal dan pastikan mereka ditempatkan dengan benar dalam struktur data.
+    3.  **Berikan Analisis**: Untuk setiap tabel, berikan analisis singkat yang merangkum tujuan dan poin-poin penting dari tabel tersebut.
 
-    Contoh:
+    **Format Output JSON yang Diperlukan**:
+    - Sebuah list utama. Setiap elemen dalam list adalah objek yang mewakili satu tabel.
+    - Setiap objek tabel HARUS memiliki dua kunci: `analysis` dan `data`.
+    - `analysis`: Sebuah string teks yang berisi ringkasan atau wawasan dari data tabel.
+    - `data`: Sebuah list dari list, di mana setiap list dalam merepresentasikan satu baris dalam tabel.
+        - **PENTING**: Baris pertama (atau beberapa baris pertama) HARUS mewakili header tabel secara lengkap, termasuk header multi-level jika ada.
+        - Pertahankan baris kosong jika itu adalah bagian dari struktur tabel untuk memisahkan bagian-bagian.
+        - Jangan menghilangkan baris total atau subtotal.
+
+    **Contoh untuk Tabel Keuangan Kompleks**:
     [
       {
-        "analysis": "Tabel ini menunjukkan penjualan produk berdasarkan wilayah, dengan penjualan tertinggi di wilayah Utara.",
+        "analysis": "Tabel ini adalah neraca saldo yang menunjukkan saldo debit dan kredit untuk setiap akun, beserta jurnal penyesuaian dan saldo setelah penyesuaian.",
         "data": [
-          ["Produk", "Wilayah", "Penjualan"],
-          ["A", "Utara", 150],
-          ["B", "Selatan", 120]
+          ["No", "Nama Akun", "Neraca Saldo", "", "Jurnal Penyesuaian", "", "Neraca Saldo Setelah Disesuaikan", ""],
+          ["", "", "Debit", "Kredit", "Debit", "Kredit", "Debit", "Kredit"],
+          ["101", "Kas", "61,700,000", "", "1,600,000", "", "63,300,000", ""],
+          ["102", "Piutang Usaha", "20,500,000", "", "", "", "20,500,000", ""],
+          ["", "Jumlah", "154,860,000", "154,860,000", "29,900,000", "29,900,000", "169,260,000", "169,260,000"]
         ]
       }
     ]
 
-    Jika tidak ada tabel yang ditemukan, kembalikan list JSON kosong: [].
+    Jika tidak ada tabel yang ditemukan, kembalikan list JSON kosong: `[]`.
     Hanya kembalikan output dalam format JSON mentah tanpa penjelasan atau format tambahan seperti ```json ... ```.
     """
 
