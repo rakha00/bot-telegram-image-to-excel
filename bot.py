@@ -9,9 +9,11 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
-
-import excel_generator
+import importlib.util
+import sys
+import time
 import ollama_vision_extractor # Menggunakan ekstraktor berbasis Ollama
+from helpers import ensure_safe_html_for_pre
 
 # Muat environment variables dari .env file
 load_dotenv()
@@ -56,106 +58,119 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         process_image_in_background(context, chat_id, temp_image_path, status_message.message_id)
     )
 
-async def update_status_indicator(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int):
-    """Mengedit pesan untuk menunjukkan bahwa bot sedang bekerja."""
-    indicators = ["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"]
-    i = 0
-    while True:
-        try:
-            await context.bot.edit_message_text(
-                text=f"Analisis sedang berlangsung... {indicators[i % len(indicators)]}",
-                chat_id=chat_id,
-                message_id=message_id
-            )
-            i += 1
-            await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.warning(f"Tidak dapat mengedit pesan status: {e}")
-            break
+async def stream_and_update_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, image_path: str):
+    """Memperbarui pesan secara real-time dengan skrip yang di-stream dari AI."""
+    full_script = ""
+    last_sent_text = ""
+    last_update_time = time.time()
+    update_interval = 1.0  # Detik
+
+    initial_text = "⏳ AI sedang membuat skrip...\n\n<pre></pre>"
+    await context.bot.edit_message_text(text=initial_text, chat_id=chat_id, message_id=message_id, parse_mode=ParseMode.HTML)
+    last_sent_text = initial_text
+
+    async for chunk in ollama_vision_extractor.stream_excel_script(image_path):
+        full_script += chunk
+        current_time = time.time()
+        if current_time - last_update_time > update_interval:
+            try:
+                safe_content = ensure_safe_html_for_pre(full_script)
+                new_text = f"⏳ AI sedang membuat skrip...\n\n<pre>{safe_content}</pre>"
+                
+                if new_text != last_sent_text:
+                    await context.bot.edit_message_text(text=new_text, chat_id=chat_id, message_id=message_id, parse_mode=ParseMode.HTML)
+                    last_sent_text = new_text
+                last_update_time = current_time
+            except Exception as e:
+                if "Message is not modified" not in str(e):
+                    logger.warning(f"Gagal memperbarui pesan streaming: {e}")
+    
+    # Pembaruan final untuk memastikan skrip yang lengkap dan bersih ditampilkan
+    safe_final_script = ensure_safe_html_for_pre(full_script)
+    final_text = f"⏳ AI sedang membuat skrip...\n\n<pre>{safe_final_script}</pre>"
+    if final_text != last_sent_text:
+        await context.bot.edit_message_text(text=final_text, chat_id=chat_id, message_id=message_id, parse_mode=ParseMode.HTML)
+    
+    return full_script
 
 async def process_image_in_background(context: ContextTypes.DEFAULT_TYPE, chat_id: int, temp_image_path: str, message_id: int):
-    """Fungsi yang berjalan di latar belakang untuk memproses gambar dengan indikator status."""
-    output_excel_path = None  # Tetap ada untuk logika pembersihan
-    indicator_task = context.application.create_task(
-        update_status_indicator(context, chat_id, message_id)
-    )
+    """Fungsi yang berjalan di latar belakang untuk memproses gambar dengan pembaruan status real-time."""
+    output_excel_path = None
+    temp_script_path = None
 
     try:
-        logger.info(f"Memulai pemrosesan latar belakang untuk: {temp_image_path}")
-        
-        # Menggunakan model qwen2.5vl:latest secara eksplisit
-        results = await ollama_vision_extractor.extract_tables_with_ollama(temp_image_path, model_name='qwen2.5vl:latest')
+        script_code = await stream_and_update_message(context, chat_id, message_id, temp_image_path)
 
-        indicator_task.cancel()
-        await asyncio.sleep(0.1)  # Beri waktu untuk pembatalan
-
-        if not results:
+        if not script_code:
             await context.bot.edit_message_text(
-                text="Analisis selesai. Maaf, tidak ada tabel yang dapat diekstrak.",
+                text="⚠️ Analisis selesai. Maaf, AI tidak dapat menghasilkan skrip untuk gambar ini.",
                 chat_id=chat_id,
                 message_id=message_id
             )
             return
 
-        logger.info(f"Berhasil mengekstrak {len(results)} tabel. Membuat file Excel...")
         await context.bot.edit_message_text(
-            text=f"✅ Analisis selesai! Ditemukan {len(results)} tabel. Membuat file Excel...",
+            text="⚙️ Skrip diterima. Mengeksekusi kode untuk membuat file Excel...",
             chat_id=chat_id,
             message_id=message_id,
         )
 
-        # Pisahkan dataframes dan analisis
-        dataframes = [res[0] for res in results]
-        analyses = [f"Analisis Tabel {i+1}:\n{res[1]}" for i, res in enumerate(results)]
-        
-        # Gabungkan semua analisis menjadi satu teks ringkasan
-        summary_text = "\n\n".join(analyses)
+        # Membersihkan skrip dari markdown fences sebelum menyimpan
+        if script_code.strip().startswith("```python"):
+            script_code = script_code.strip()[9:]
+        if script_code.strip().endswith("```"):
+            script_code = script_code.strip()[:-3]
 
-        # Buat file Excel
         file_id = os.path.basename(temp_image_path).split('.')[0]
         output_excel_path = os.path.join("output", f"{file_id}_hasil.xlsx")
-        
-        excel_generator.create_excel_file(dataframes, summary_text, output_excel_path)
-        logger.info(f"File Excel dibuat di: {output_excel_path}")
+        temp_script_path = os.path.join("output", f"{file_id}_script.py")
 
-        # Kirim file Excel
-        await context.bot.send_document(
-            chat_id=chat_id,
-            document=open(output_excel_path, 'rb'),
-            filename=os.path.basename(output_excel_path),
-            caption="Berikut adalah file Excel dengan data yang diekstrak."
-        )
-        
-        # Kirim ringkasan analisis sebagai pesan teks terpisah
-        if summary_text:
-            await context.bot.send_message(
+        with open(temp_script_path, "w", encoding="utf-8") as f:
+            f.write(script_code.strip())
+
+        try:
+            spec = importlib.util.spec_from_file_location("generated_script", temp_script_path)
+            generated_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(generated_module)
+            generated_module.create_excel(output_excel_path)
+            logger.info(f"Skrip berhasil dieksekusi. File Excel dibuat di: {output_excel_path}")
+
+            await context.bot.edit_message_text(
+                text="✅ Eksekusi berhasil. Mengirim file Excel...",
                 chat_id=chat_id,
-                text=f"<b>Ringkasan Analisis:</b>\n\n{summary_text}",
+                message_id=message_id,
+            )
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=open(output_excel_path, 'rb'),
+                filename=os.path.basename(output_excel_path),
+                caption="Berikut adalah file Excel yang dibuat oleh AI."
+            )
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+
+        except Exception as e:
+            logger.error(f"Gagal mengeksekusi skrip yang dihasilkan AI: {e}", exc_info=True)
+            await context.bot.edit_message_text(
+                text=f"❌ Maaf, terjadi kesalahan saat mengeksekusi skrip.\n\n<b>Error:</b>\n<pre>{e}</pre>",
+                chat_id=chat_id,
+                message_id=message_id,
                 parse_mode=ParseMode.HTML
             )
 
     except Exception as e:
-        indicator_task.cancel()
-        await asyncio.sleep(0.1)
         logger.error(f"Terjadi kesalahan besar dalam alur kerja latar belakang: {e}", exc_info=True)
         await context.bot.edit_message_text(
-            text=f"❌ Maaf, terjadi kesalahan saat memproses gambar: {e}",
+            text=f"❌ Maaf, terjadi kesalahan tak terduga saat memproses gambar.",
             chat_id=chat_id,
             message_id=message_id
         )
     finally:
-        if not indicator_task.done():
-            indicator_task.cancel()
-        
-        # Hapus file gambar dan excel sementara
         if os.path.exists(temp_image_path):
             os.remove(temp_image_path)
-            logger.info(f"File gambar sementara dihapus: {temp_image_path}")
+        if temp_script_path and os.path.exists(temp_script_path):
+            os.remove(temp_script_path)
         if output_excel_path and os.path.exists(output_excel_path):
             os.remove(output_excel_path)
-            logger.info(f"File Excel sementara dihapus: {output_excel_path}")
 
 
 def main() -> None:

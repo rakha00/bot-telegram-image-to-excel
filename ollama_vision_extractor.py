@@ -7,6 +7,7 @@ import pandas as pd
 import json
 import base64
 import os
+import asyncio
 
 def get_image_base64(image_path: str) -> str:
     """Mengonversi file gambar menjadi string base64."""
@@ -14,101 +15,81 @@ def get_image_base64(image_path: str) -> str:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
 def generate_ollama_prompt():
-    """Membangun prompt instruksi untuk ekstraksi dan analisis tabel."""
+    """Membangun prompt instruksi untuk menghasilkan skrip Python mentah."""
     return """
-    Analisis gambar yang diberikan dengan saksama. Fokus utama Anda adalah pada **ekstraksi tabel yang akurat dan lengkap**, terutama untuk dokumen keuangan yang kompleks seperti neraca atau laporan laba rugi.
+    **PERINTAH TEGAS: MISI UTAMA ANDA ADALAH MEREPLIKASI STRUKTUR TABEL SECARA SEMPURNA.**
 
-    Tugas Anda adalah:
-    1.  **Deteksi dan Ekstrak SEMUA Tabel**: Identifikasi setiap tabel dalam gambar.
-    2.  **Tangani Struktur Kompleks**: Berikan perhatian khusus pada:
-        *   **Header Multi-Level**: Kenali jika sebuah kolom memiliki beberapa tingkat header (misalnya, 'Neraca Saldo' yang memiliki sub-kolom 'Debit' dan 'Kredit').
-        *   **Baris Hirarkis**: Pahami baris yang merupakan kategori utama (misalnya, 'ASET LANCAR') dan sub-barisnya (misalnya, 'Kas', 'Piutang'). Pertahankan struktur ini.
-        *   **Sel yang Digabung (Merged Cells)**: Interpretasikan sel yang digabung dengan benar, baik secara horizontal maupun vertikal.
-        *   **Baris Total dan Subtotal**: Identifikasi baris yang berisi total atau subtotal dan pastikan mereka ditempatkan dengan benar dalam struktur data.
-    3.  **Berikan Analisis**: Untuk setiap tabel, berikan analisis singkat yang merangkum tujuan dan poin-poin penting dari tabel tersebut.
+    Tugas Anda adalah mengubah gambar tabel menjadi **skrip Python** yang menghasilkan file Excel. Akurasi adalah segalanya. Skrip yang Anda hasilkan harus menciptakan kembali tabel **persis** seperti di gambar.
 
-    **Format Output JSON yang Diperlukan**:
-    - Sebuah list utama. Setiap elemen dalam list adalah objek yang mewakili satu tabel.
-    - Setiap objek tabel HARUS memiliki dua kunci: `analysis` dan `data`.
-    - `analysis`: Sebuah string teks yang berisi ringkasan atau wawasan dari data tabel.
-    - `data`: Sebuah list dari list, di mana setiap list dalam merepresentasikan satu baris dalam tabel.
-        - **PENTING**: Baris pertama (atau beberapa baris pertama) HARUS mewakili header tabel secara lengkap, termasuk header multi-level jika ada.
-        - Pertahankan baris kosong jika itu adalah bagian dari struktur tabel untuk memisahkan bagian-bagian.
-        - Jangan menghilangkan baris total atau subtotal.
+    **ATURAN WAJIB**:
+    1.  **Output HANYA Kode**: Respons Anda HARUS hanya berisi kode Python mentah. Jangan sertakan penjelasan, komentar, atau format markdown seperti ```python ... ```.
+    2.  **Replikasi 1:1**: Skrip harus menggunakan `pandas` dan `openpyxl` untuk membuat file Excel yang merupakan cerminan sempurna dari gambar.
+    3.  **Aturan Penggabungan Ketat**: HANYA gabungkan sel jika ada bukti visual yang jelas.
+    4.  **Fungsi Wajib**: Skrip HARUS berisi fungsi `create_excel(output_path: str)`.
 
-    **Contoh untuk Tabel Keuangan Kompleks**:
-    [
-      {
-        "analysis": "Tabel ini adalah neraca saldo yang menunjukkan saldo debit dan kredit untuk setiap akun, beserta jurnal penyesuaian dan saldo setelah penyesuaian.",
-        "data": [
-          ["No", "Nama Akun", "Neraca Saldo", "", "Jurnal Penyesuaian", "", "Neraca Saldo Setelah Disesuaikan", ""],
-          ["", "", "Debit", "Kredit", "Debit", "Kredit", "Debit", "Kredit"],
-          ["101", "Kas", "61,700,000", "", "1,600,000", "", "63,300,000", ""],
-          ["102", "Piutang Usaha", "20,500,000", "", "", "", "20,500,000", ""],
-          ["", "Jumlah", "154,860,000", "154,860,000", "29,900,000", "29,900,000", "169,260,000", "169,260,000"]
+    **Contoh Output Sempurna (Hanya Teks Ini)**:
+    import pandas as pd
+    from openpyxl import load_workbook
+    from openpyxl.styles import Font, Alignment
+
+    def create_excel(output_path: str):
+        data = [
+            ['ASET', None, '2007', 'KEWAJIBAN DAN EKUITAS', None, '2007'],
+            ['ASET LANCAR', None, None, 'EKUITAS', None, None],
+            ['Kas dan Bank', '37.021.114', None, 'Modal Saham 800 saham, Disetor dan Dibayar Penuh 100 saham', None, '100.000.000'],
+            ['Piutang Lain-lain', '72.500.000', None, 'Nilai Nominal Rp. 1.000.000,- per saham', None, None],
+            ['Persediaan', '51.600.000', None, 'Laba ditahan', None, '6.582.427.859'],
+            ['Jumlah Aset Lancar', '161.121.114', None, 'Laba (Rugi) Tahun Berjalan', None, '2.030.943.255'],
+            [None, None, None, 'Total Ekuitas', None, '8.713.371.114'],
+            ['ASET TETAP', None, None, None, None, None],
+            ['Tanah', '4.200.000.000', None, None, None, None],
+            ['Mesin dan Instalasi', '4.115.000.000', None, None, None, None],
+            ['Bangunan Pabrik', '4.185.000.000', None, None, None, None],
+            ['Total', '12.500.000.000', None, None, None, None],
+            ['Akumulasi penyusutan', '(3.947.750.000)', None, None, None, None],
+            ['Nilai Buku Aset Tetap', '8.552.250.000', None, None, None, None],
+            ['TOTAL ASET', '8.713.371.114', None, 'TOTAL KEWAJIBAN DAN EKUITAS', None, '8.713.371.114']
         ]
-      }
-    ]
-
-    Jika tidak ada tabel yang ditemukan, kembalikan list JSON kosong: `[]`.
-    Hanya kembalikan output dalam format JSON mentah tanpa penjelasan atau format tambahan seperti ```json ... ```.
+        df = pd.DataFrame(data)
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Neraca', index=False, header=False)
+            # ... (sisa logika penggabungan sel dan gaya)
     """
 
-async def extract_tables_with_ollama(image_path: str, model_name: str = 'qwen2.5vl:latest') -> list[tuple[pd.DataFrame, str]]:
+async def stream_excel_script(image_path: str, model_name: str = 'qwen2.5vl:latest'):
     """
-    Mengekstrak dan menganalisis tabel dari gambar menggunakan model vision lokal via Ollama.
+    Menghasilkan skrip Python secara streaming untuk membuat file Excel dari gambar.
 
     Args:
         image_path: Path ke file gambar.
         model_name: Nama model Ollama yang akan digunakan.
 
-    Returns:
-        Daftar tuple, di mana setiap tuple berisi (DataFrame, analysis_string).
+    Yields:
+        Potongan (chunk) dari skrip Python yang dihasilkan.
     """
     try:
         client = ollama.AsyncClient()
         image_b64 = get_image_base64(image_path)
         prompt_text = generate_ollama_prompt()
 
-        response = await client.generate(
+        options = {
+            'num_predict': 4096
+        }
+
+        stream = await client.generate(
             model=model_name,
             prompt=prompt_text,
             images=[image_b64],
-            format='json'
+            options=options,
+            stream=True
         )
-        
-        json_string = response.get('response', '{}')
-        
-        if not json_string.strip():
-            return []
+        async for chunk in stream:
+            if 'response' in chunk:
+                yield chunk['response']
 
-        tables_data = json.loads(json_string)
-        
-        if isinstance(tables_data, dict):
-            tables_data = [tables_data]
-
-        if not isinstance(tables_data, list):
-            return []
-
-        results = []
-        for table_obj in tables_data:
-            if isinstance(table_obj, dict) and "data" in table_obj and "analysis" in table_obj:
-                data = table_obj.get("data")
-                analysis = table_obj.get("analysis", "Tidak ada analisis yang diberikan.")
-                
-                if data and len(data) > 1:
-                    header = data[0]
-                    table_data = data[1:]
-                    df = pd.DataFrame(table_data, columns=header)
-                    results.append((df, analysis))
-        
-        return results
-
-    except ollama.ResponseError as e:
-        print(f"Error dari server Ollama: {e.error}")
-        if "model not found" in e.error:
-            print(f"Pastikan model '{model_name}' sudah di-pull dengan 'ollama run {model_name}'")
-        return []
+    except asyncio.TimeoutError:
+        print("Error: Waktu pemrosesan Ollama habis (timeout).")
+        yield ""
     except Exception as e:
-        print(f"Error saat berkomunikasi dengan Ollama: {e}")
-        return []
+        print(f"Error saat streaming dari Ollama: {e}")
+        yield ""
