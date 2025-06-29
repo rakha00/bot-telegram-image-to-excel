@@ -11,18 +11,15 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from telegram.constants import ParseMode
 import importlib.util
 import sys
-import gemini_vision_extractor # Menggunakan ekstraktor berbasis Gemini
+import gemini_vision_extractor
 
-# Muat environment variables dari .env file
 load_dotenv()
 
-# Konfigurasi logging dasar
 logging.basicConfig(
     format="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Ambil token dari environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not TELEGRAM_BOT_TOKEN:
@@ -49,13 +46,12 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await photo_file.download_to_drive(temp_image_path)
     logger.info(f"Gambar disimpan di: {temp_image_path}")
 
-    # Kirim pesan konfirmasi instan yang akan kita edit nanti
     status_message = await context.bot.send_message(
         chat_id=chat_id,
         text="✅ Gambar diterima. Memulai analisis..."
     )
 
-    # Jalankan proses yang berat di thread terpisah untuk tidak memblokir bot
+    # Jalankan proses di latar belakang agar tidak memblokir bot
     context.application.create_task(
         process_image_in_background(context, chat_id, temp_image_path, status_message.message_id)
     )
@@ -72,7 +68,6 @@ async def process_image_in_background(context: ContextTypes.DEFAULT_TYPE, chat_i
             message_id=message_id
         )
         
-        # Akumulasi skrip dari stream sambil mencetaknya ke terminal
         script_code = ""
         stream_started = False
         print("\n--- Menunggu Stream dari AI ---")
@@ -102,7 +97,7 @@ async def process_image_in_background(context: ContextTypes.DEFAULT_TYPE, chat_i
             message_id=message_id,
         )
 
-        # Membersihkan skrip dari markdown fences sebelum menyimpan
+        # Membersihkan skrip dari markdown fences
         if script_code.strip().startswith("```python"):
             script_code = script_code.strip()[9:]
         if script_code.strip().endswith("```"):

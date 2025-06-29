@@ -33,23 +33,21 @@ def generate_gemini_prompt():
     from openpyxl import load_workbook
 
     def create_excel(output_path: str):
-        # Data harus mencerminkan grid. Gunakan None untuk sel kosong.
         data = [
             ['Header 1', 'Header 2', 'Header 3'],
             ['Data A1', 'Data B1', 'Data C1'],
-            ['Data A2', None, 'Data C2'] # Sel B3 kosong
+            ['Data A2', None, 'Data C2']
         ]
         df = pd.DataFrame(data)
         with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='Sheet1', index=False, header=False)
             workbook = writer.book
             worksheet = writer.sheets['Sheet1']
-            # Contoh penggabungan HANYA jika ada secara visual dalam gambar
             # worksheet.merge_cells('A1:C1')
             workbook.save(output_path)
     """
 
-async def stream_excel_script(image_path: str, model_name: str = 'gemini-2.5-flash'):
+async def stream_excel_script(image_path: str, model_name: str = 'gemini-1.5-flash'):
     """
     Menghasilkan skrip Python secara streaming untuk membuat file Excel dari gambar menggunakan Gemini.
     """
@@ -60,7 +58,6 @@ async def stream_excel_script(image_path: str, model_name: str = 'gemini-2.5-fla
         prompt = generate_gemini_prompt()
         image = PIL.Image.open(image_path)
 
-        # Menggunakan stream=True untuk mendapatkan respons secara bertahap
         response_stream = await model.generate_content_async([prompt, image], stream=True)
         
         async for chunk in response_stream:

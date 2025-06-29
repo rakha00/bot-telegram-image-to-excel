@@ -2,12 +2,6 @@ python-dotenv
 python-telegram-bot
 pandas
 openpyxl
-# Library utama untuk ekstraksi struktur tabel
-img2table
-# Backend OCR untuk img2table
-easyocr
-torch
-torchvision
 # Library untuk Google Gemini
 google-generativeai
 Pillow
