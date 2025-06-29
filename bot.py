@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from telegram.constants import ParseMode
 import importlib.util
 import sys
-import ollama_vision_extractor # Menggunakan ekstraktor berbasis Ollama
+import gemini_vision_extractor # Menggunakan ekstraktor berbasis Gemini
 
 # Muat environment variables dari .env file
 load_dotenv()
@@ -24,14 +24,18 @@ logger = logging.getLogger(__name__)
 
 # Ambil token dari environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN tidak ditemukan di file .env")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY tidak ditemukan di file .env")
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Mengirim pesan ketika perintah /start dijalankan."""
     user = update.effective_user
     await update.message.reply_html(
-        rf"Halo {user.mention_html()}! Kirimkan gambar tabel. Saya akan menggunakan AI (LLaVA) untuk mengekstrak data dan membuat file Excel.",
+        rf"Halo {user.mention_html()}! Kirimkan gambar tabel. Saya akan menggunakan AI (Gemini Vision) untuk mengekstrak data dan membuat file Excel.",
     )
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -72,7 +76,7 @@ async def process_image_in_background(context: ContextTypes.DEFAULT_TYPE, chat_i
         script_code = ""
         stream_started = False
         print("\n--- Menunggu Stream dari AI ---")
-        async for chunk in ollama_vision_extractor.stream_excel_script(temp_image_path):
+        async for chunk in gemini_vision_extractor.stream_excel_script(temp_image_path):
             if not stream_started:
                 print("\n--- Streaming Dimulai ---")
                 await context.bot.edit_message_text(
