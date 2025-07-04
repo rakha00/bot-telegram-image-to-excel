@@ -1,5 +1,7 @@
+Flask
 python-dotenv
 python-telegram-bot
+pdfplumber
 pandas
 openpyxl
 # Library untuk Google Gemini

@@ -1,5 +1,6 @@
 """
-Modul untuk mengekstrak tabel dari gambar menggunakan Google Gemini Vision API.
+Modul untuk mengekstrak tabel dari gambar menggunakan Google Gemini Vision API,
+dan mengubahnya menjadi JSON mentah.
 """
 import os
 import google.generativeai as genai
@@ -14,46 +15,25 @@ def configure_gemini():
     genai.configure(api_key=api_key)
 
 def generate_gemini_prompt():
-    """Membangun prompt yang sangat ketat untuk menghasilkan skrip Python."""
     return """
-    **MISI ANDA: UBAH GAMBAR MENJADI SKRIP PYTHON YANG MEREPLIKASI GRID EXCEL DENGAN SEMPURNA.**
-
-    **PERINTAH UTAMA**:
-    - **HANYA KODE PYTHON.** Seluruh respons Anda harus berupa kode Python mentah yang dapat dieksekusi. Jangan tambahkan kata lain, penjelasan, atau format markdown.
-    - **FOKUS PADA STRUKTUR GRID.** Prioritas utama Anda adalah menempatkan data di sel yang benar.
-    - Gunakan `pandas` untuk data dan `openpyxl` untuk `merge_cells`.
-
-    **ATURAN PENTING - JANGAN LAKUKAN INI**:
-    - **JANGAN** gabungkan sel kecuali Anda melihat satu sel dengan jelas membentang beberapa baris atau kolom dalam gambar.
-    - **JANGAN** mengarang data atau baris yang tidak ada dalam gambar. Jika sel kosong, gunakan `None`.
-    - **JANGAN** gunakan `openpyxl.styles` atau mencoba mereplikasi gaya visual apa pun (tebal, perataan, dll.).
-
-    **CONTOH SEDERHANA**:
-    import pandas as pd
-    from openpyxl import load_workbook
-
-    def create_excel(output_path: str):
-        data = [
-            ['Header 1', 'Header 2', 'Header 3'],
-            ['Data A1', 'Data B1', 'Data C1'],
-            ['Data A2', None, 'Data C2']
-        ]
-        df = pd.DataFrame(data)
-        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Sheet1', index=False, header=False)
-            workbook = writer.book
-            worksheet = writer.sheets['Sheet1']
-            # worksheet.merge_cells('A1:C1')
-            workbook.save(output_path)
+    UBAH GAMBAR TABEL INI MENJADI JSON ARRAY OF OBJECTS (ARRAY BERISI DICTIONARY).
+    - Baris pertama tabel adalah header/kolom, gunakan sebagai key di setiap object.
+    - Setiap baris berikutnya adalah data, gunakan header sebagai key dan isi sel sebagai value.
+    - Jika sel kosong, isi dengan null.
+    - Hanya kembalikan JSON array of objects, tanpa penjelasan, tanpa markdown, tanpa teks tambahan.
+    - Contoh:
+    [
+      {"Header1": "Data1", "Header2": null},
+      {"Header1": "Data2", "Header2": "Data3"}
+    ]
     """
 
-async def stream_excel_script(image_path: str, model_name: str = 'gemini-1.5-flash'):
+async def stream_json_output(image_path: str, model_name: str = 'gemini-1.5-flash'):
     """
-    Menghasilkan skrip Python secara streaming untuk membuat file Excel dari gambar menggunakan Gemini.
+    Menghasilkan hasil JSON secara streaming dari gambar tabel menggunakan Gemini Vision.
     """
     try:
         configure_gemini()
-        
         model = genai.GenerativeModel(model_name)
         prompt = generate_gemini_prompt()
         image = PIL.Image.open(image_path)
