@@ -1,9 +1,10 @@
 import json
 import os
 
-from flask import Flask, abort, jsonify, send_from_directory
+from flask import Flask, abort, jsonify, send_from_directory, Response
 
 app = Flask(__name__)
+app.config['JSON_SORT_KEYS'] = False
 
 # Konfigurasi path ke direktori 'output' tempat file JSON disimpan
 OUTPUT_FOLDER = 'output'
@@ -68,6 +69,8 @@ def get_json_file(filename):
         
         # Struktur respons sesuai permintaan
         response_payload = {
+            "status" : "SUCCESS",
+            "reason" : "File Successfully Read",
             "read": []
         }
 
@@ -76,7 +79,8 @@ def get_json_file(filename):
         # dan data JSON input Anda.
         account_to_output_key_map = {
             "Pendapatan bunga": "interest_income",
-            "Jumlah partisipasi anggota": "member_participation", 
+            "Pendapatan usaha lainnya": "other_business_income",
+            "Jumlah partisipasi anggota": "member_participation",
             "PARTISIPASI ANGGOTA": "member_participation_category", # Ini kategori, tidak ada di output expectation
             "BEBAN USAHA": "operating_expenses_category", # Ini kategori, tidak ada di output expectation
             "Beban bunga": "interest_expense",
@@ -84,36 +88,34 @@ def get_json_file(filename):
             "Beban kepegawaian": "personnel_expense",
             "Beban administrasi dan umum": "administrative_general_expenses",
             "Beban penyusutan dan amortisasi": "depreciation_amortization_expenses",
-            "Jumlah beban usaha": "business_expense", 
+            "Beban usaha lainnya": "other_business_expense",
+            "Jumlah beban usaha": "business_expense",
             "SISA HASIL USAHA BRUTO": "gross_profit", # Tidak ada di output expectation
-            "Hasil investasi": "investment_result", 
+            "Hasil investasi": "investment_result",
             "Beban perkoperasian": "cooperative_expense",
             "PENDAPATAN & BEBAN LAIN": "other_income_expense_category", # Ini kategori, tidak ada di output expectation
             "Pendapatan lain": "other_income",
             "Beban lain": "other_expense",
-            "Sisa hasil usaha sebelum pajak": "remaining_profit_before_tax", 
+            "Sisa hasil usaha sebelum pajak": "remaining_profit_before_tax",
             "Beban pajak penghasilan": "income_tax_expense",
-            "SISA HASIL USAHA": "remaining_profit", 
+            "SISA HASIL USAHA": "remaining_profit",
             "Penghasilan komprehensif lain": "other_comprehensive_income",
             "PENGHASILAN KOMPREHENSIF": "comprehensive_income",
-            # Kunci yang tidak ada Akun langsung di JSON input, tetapi ada di output expectation
-            # Mereka akan ditambahkan sebagai null jika tidak ada data yang cocok.
-            # "other_business_income": "other_business_income", 
-            # "other_business_expense": "other_business_expense"
         }
 
         # Urutan kunci yang diinginkan dalam objek di dalam array 'read'
         # Ini akan menentukan urutan output JSON Anda.
         desired_output_keys_order = [
+            "year",
             "interest_income",
-            "other_business_income", # Akan null jika tidak ada Akun yang dipetakan
+            "other_business_income",
             "member_participation",
             "interest_expense",
             "allowance_expense",
             "personnel_expense",
             "administrative_general_expenses",
             "depreciation_amortization_expenses",
-            "other_business_expense", # Akan null jika tidak ada Akun yang dipetakan
+            "other_business_expense",
             "business_expense",
             "investment_result",
             "cooperative_expense",
@@ -138,36 +140,49 @@ def get_json_file(filename):
 
         # Proses data untuk setiap tahun yang ditemukan
         for year in sorted_years:
-            year_data_entry = {"year": int(year)} # Inisialisasi 'year' di sini
+            year_data_entry = {} # Inisialisasi dictionary kosong
             temp_data_storage = {} # Simpan data sementara untuk tahun ini
 
+            # Pertama, kumpulkan semua data untuk tahun saat ini
             for item in full_data_from_file:
                 akun_value = item.get('Akun')
                 if akun_value in account_to_output_key_map and year in item:
                     output_key = account_to_output_key_map[akun_value]
-                    value_for_year = item.get(year) 
+                    value_for_year = item.get(year)
                     
                     temp_data_storage[output_key] = {
                         "value": clean_value_string(value_for_year),
-                        "confidence": None 
+                        "conUidence": None
                     }
             
-            # Isi year_data_entry berdasarkan urutan yang diinginkan
-            for key in desired_output_keys_order[1:]: # Mulai dari kunci kedua setelah 'year'
-                if key in temp_data_storage:
+            # Kedua, bangun entri data tahunan dengan urutan yang benar
+            for key in desired_output_keys_order:
+                if key == "year":
+                    year_data_entry['year'] = int(year)
+                elif key in temp_data_storage:
                     year_data_entry[key] = temp_data_storage[key]
                 else:
-                    # Jika kunci tidak ditemukan di data asli atau pemetaan, tambahkan dengan nilai null
-                    year_data_entry[key] = {"value": None, "confidence": None}
+                    # Jika kunci tidak ditemukan, tambahkan dengan nilai null
+                    year_data_entry[key] = {"value": None, "conUidence": None}
             
             response_payload["read"].append(year_data_entry)
+            
         if not response_payload["read"]:
             response_payload["status"] = "FAILED"
             response_payload["reason"] = "No year data found in the file."
 
-            return jsonify(response_payload), 404 # Mengembalikan 404 jika tidak ada data tahunan yang ditemukan
+            return Response(json.dumps(response_payload, sort_keys=False), mimetype='application/json', status=404)
 
-        return jsonify(response_payload)
+        # Explicitly create the final dictionary to ensure key order.
+        # This is the most reliable way to control the output structure.
+        final_response = {
+            "status": response_payload["status"],
+            "reason": response_payload["reason"],
+            "read": response_payload["read"]
+        }
+        # Use json.dumps with sort_keys=False and return a raw Response object
+        # to have full control over the output format and prevent any reordering by jsonify.
+        return Response(json.dumps(final_response, sort_keys=False), mimetype='application/json')
     except json.JSONDecodeError:
         return jsonify({"error": "File bukan JSON yang valid."}, 400)
     except Exception as e:
