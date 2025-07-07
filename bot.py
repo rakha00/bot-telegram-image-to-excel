@@ -5,6 +5,8 @@ import asyncio
 import json
 import logging
 import os
+import uuid
+from datetime import datetime
 
 import docx
 import pdfplumber
@@ -105,7 +107,9 @@ async def process_pdf_and_send_json(context, chat_id, temp_pdf_path, message_id,
             return
         
         # Gunakan nama file asli sebagai nama file JSON
-        output_json_path = os.path.join("output", f"{original_base_filename}.json")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        unique_id = uuid.uuid4().hex[:8] 
+        output_json_path = os.path.join("output", f"{original_base_filename}_{timestamp}_{unique_id}.json")
         logger.info(f"Akan menyimpan JSON ke: {output_json_path}")
         
         with open(output_json_path, "w", encoding="utf-8") as f:
@@ -200,7 +204,9 @@ async def handle_docx(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         
         # Gunakan nama file asli sebagai nama file JSON
-        output_json_path = os.path.join("output", f"{base_filename}.json")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        unique_id = uuid.uuid4().hex[:8] 
+        output_json_path = os.path.join("output", f"{base_filename}_{timestamp}_{unique_id}.json")
         logger.info(f"Akan menyimpan JSON ke: {output_json_path}")
 
         with open(output_json_path, "w", encoding="utf-8") as f:
@@ -329,7 +335,9 @@ async def process_image_and_send_json(context: ContextTypes.DEFAULT_TYPE, chat_i
         # --------------------------------------
 
         # Gunakan nama file asli sebagai nama file JSON
-        output_json_path = os.path.join("output", f"{original_base_filename}.json")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        unique_id = uuid.uuid4().hex[:8]
+        output_json_path = os.path.join("output", f"{original_base_filename}_{timestamp}_{unique_id}.json")
 
         with open(output_json_path, "w", encoding="utf-8") as f:
             f.write(json_result_fixed)
