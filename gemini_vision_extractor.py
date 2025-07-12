@@ -48,3 +48,13 @@ async def stream_json_output(image_path: str, model_name: str = 'gemini-1.5-flas
     except Exception as e:
         print(f"Error saat streaming dari Gemini: {e}")
         yield ""
+
+async def get_json_output(image_path: str) -> str:
+    """
+    Processes an image and returns the full JSON output as a single string.
+    This is a helper for calling the streaming function from a synchronous context.
+    """
+    full_response = []
+    async for chunk in stream_json_output(image_path):
+        full_response.append(chunk)
+    return "".join(full_response)

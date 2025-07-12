@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Unggah File</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: #f3f4f6; /* Warna latar belakang abu-abu muda */
+        display: flex;
+        flex-direction: column; /* Mengubah arah flex menjadi kolom */
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        padding: 20px;
+      }
+      .container {
+        background-color: #ffffff; /* Warna latar belakang putih untuk kontainer */
+        border-radius: 1rem; /* Sudut membulat */
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+          0 4px 6px -2px rgba(0, 0, 0, 0.05); /* Bayangan */
+        padding: 2.5rem; /* Padding lebih besar */
+        width: 100%;
+        max-width: 500px;
+        margin-bottom: 20px; /* Jarak antara form dan kartu tampilan */
+      }
+      .file-input-wrapper {
+        position: relative;
+        overflow: hidden;
+        display: inline-block;
+        width: 100%;
+      }
+      .file-input-wrapper input[type="file"] {
+        position: absolute;
+        left: 0;
+        top: 0;
+        opacity: 0;
+        cursor: pointer;
+        width: 100%;
+        height: 100%;
+      }
+      .file-input-button {
+        background-color: #4f46e5; /* Warna ungu */
+        color: white;
+        padding: 0.75rem 1.5rem;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background-color 0.3s ease;
+        width: 100%;
+      }
+      .file-input-button:hover {
+        background-color: #4338ca; /* Warna ungu lebih gelap saat hover */
+      }
+      .file-name {
+        margin-top: 1rem;
+        padding: 0.75rem;
+        background-color: #e5e7eb; /* Warna abu-abu terang */
+        border-radius: 0.5rem;
+        font-size: 0.9rem;
+        color: #4b5563;
+        text-align: center;
+        word-break: break-all; /* Memastikan nama file panjang tidak merusak tata letak */
+      }
+      /* Style untuk preview gambar di modal */
+      .modal-image-preview {
+        /* Renamed to avoid conflict with display-card-image-preview */
+        max-width: 100%;
+        height: auto;
+        border-radius: 0.5rem;
+        margin-top: 1rem;
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      /* Style untuk kartu tampilan file */
+      .display-card {
+        background-color: #ffffff;
+        border-radius: 1rem;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+          0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        padding: 2.5rem;
+        width: 100%;
+        max-width: 500px;
+        text-align: center;
+      }
+      .display-card-content {
+        margin-top: 1rem;
+        color: #4b5563;
+      }
+      .display-card-image-preview {
+        max-width: 100%;
+        height: auto;
+        border-radius: 0.5rem;
+        margin-top: 1rem;
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1 class="text-3xl font-bold text-center text-gray-800 mb-8">
+        Unggah Dokumen
+      </h1>
+
+      <div class="mb-6">
+        <label
+          for="file-upload"
+          class="block text-gray-700 text-sm font-semibold mb-2"
+          >Pilih File:</label
+        >
+        <div class="file-input-wrapper">
+          <input
+            type="file"
+            id="file-upload"
+            accept=".pdf, .doc, .docx, .jpg, .jpeg, .png, .gif"
+          />
+          <div class="file-input-button">
+            <svg
+              class="w-5 h-5 mr-2"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+              ></path>
+            </svg>
+            <span>Pilih PDF, Word, atau Gambar</span>
+          </div>
+        </div>
+        <p id="file-name-display" class="file-name hidden">
+          Tidak ada file yang dipilih.
+        </p>
+      </div>
+
+      <button
+        id="submit-button"
+        class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
+      >
+        Kirim ke Laporan Keuangan Syariah
+      </button>
+
+      <!-- Pesan Modal (untuk menggantikan alert) -->
+      <div
+        id="message-modal"
+        class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center"
+      >
+        <div
+          class="bg-white p-8 rounded-lg shadow-xl max-w-sm w-full text-center"
+        >
+          <h3
+            class="text-xl font-semibold text-gray-800 mb-4"
+            id="modal-title"
+          ></h3>
+          <p class="text-gray-600 mb-6 text-left" id="modal-message"></p>
+          <img
+            id="modal-image-preview"
+            class="modal-image-preview hidden"
+            src=""
+            alt="Pratinjau Gambar"
+          />
+          <button
+            id="close-modal"
+            class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-md transition duration-300 mt-6"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card untuk tampilan file yang dikirim -->
+    <div id="display-file-card" class="display-card hidden">
+      <h2 class="text-2xl font-bold text-gray-800 mb-4">
+        Tampilan File yang Dikirim
+      </h2>
+      <div id="display-card-content" class="display-card-content">
+        <!-- Konten file yang dikirim akan ditampilkan di sini -->
+      </div>
+      <img
+        id="display-card-image-preview"
+        class="display-card-image-preview hidden"
+        src=""
+        alt="Pratinjau Gambar yang Dikirim"
+      />
+    </div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const fileInput = document.getElementById("file-upload");
+        const fileNameDisplay = document.getElementById("file-name-display");
+        const submitButton = document.getElementById("submit-button");
+        const messageModal = document.getElementById("message-modal");
+        const modalTitle = document.getElementById("modal-title");
+        const modalMessage = document.getElementById("modal-message");
+        const modalImagePreview = document.getElementById(
+          "modal-image-preview"
+        );
+        const closeModalButton = document.getElementById("close-modal");
+
+        const displayFileCard = document.getElementById("display-file-card");
+        const displayCardContent = document.getElementById(
+          "display-card-content"
+        );
+        const displayCardImagePreview = document.getElementById(
+          "display-card-image-preview"
+        );
+
+        // Fungsi untuk menampilkan modal pesan
+        function showMessageModal(title, message, imageUrl = null) {
+          modalTitle.textContent = title;
+          modalMessage.textContent = message;
+          modalMessage.classList.remove("text-center"); // Remove center alignment for message
+          modalMessage.classList.add("text-left"); // Add left alignment for message
+
+          if (imageUrl) {
+            modalImagePreview.src = imageUrl;
+            modalImagePreview.classList.remove("hidden");
+          } else {
+            modalImagePreview.classList.add("hidden");
+            modalImagePreview.src = ""; // Clear source when not used
+          }
+          messageModal.classList.remove("hidden");
+        }
+
+        // Fungsi untuk menyembunyikan modal pesan
+        function hideMessageModal() {
+          messageModal.classList.add("hidden");
+          modalImagePreview.classList.add("hidden"); // Ensure image preview is hidden
+          modalImagePreview.src = ""; // Clear image source
+        }
+
+        // Fungsi untuk menampilkan konten di kartu tampilan file
+        function displayFileInCard(
+          fileName,
+          fileType,
+          fileSize,
+          imageUrl = null
+        ) {
+          displayCardContent.innerHTML = `
+                    <p class="font-semibold">Nama File: <span class="font-normal">${fileName}</span></p>
+                    <p class="font-semibold">Ukuran: <span class="font-normal">${fileSize} MB</span></p>
+                    <p class="font-semibold">Tipe: <span class="font-normal">${fileType}</span></p>
+                `;
+          displayCardContent.classList.remove("hidden");
+          displayCardImagePreview.classList.add("hidden"); // Sembunyikan pratinjau gambar default
+
+          if (imageUrl) {
+            displayCardImagePreview.src = imageUrl;
+            displayCardImagePreview.classList.remove("hidden");
+          } else {
+            displayCardImagePreview.src = "";
+          }
+          displayFileCard.classList.remove("hidden"); // Tampilkan kartu tampilan file
+        }
+
+        // Event listener untuk input file
+        fileInput.addEventListener("change", (event) => {
+          const file = event.target.files[0];
+          if (file) {
+            fileNameDisplay.textContent = `File dipilih: ${file.name}`;
+            fileNameDisplay.classList.remove("hidden");
+            displayFileCard.classList.add("hidden"); // Sembunyikan kartu tampilan saat file baru dipilih
+            displayCardContent.innerHTML = ""; // Bersihkan konten kartu
+            displayCardImagePreview.src = ""; // Bersihkan pratinjau gambar di kartu
+          } else {
+            fileNameDisplay.textContent = "Tidak ada file yang dipilih.";
+            fileNameDisplay.classList.add("hidden");
+            displayFileCard.classList.add("hidden"); // Sembunyikan kartu tampilan jika tidak ada file
+            displayCardContent.innerHTML = ""; // Bersihkan konten kartu
+            displayCardImagePreview.src = ""; // Bersihkan pratinjau gambar di kartu
+          }
+        });
+
+        // Event listener untuk tombol kirim
+        submitButton.addEventListener("click", () => {
+          const file = fileInput.files[0];
+          if (file) {
+            const targetUrl = "/balance-sheet/ep/syariah/laporan-keuangan";
+            const fileName = file.name;
+            const fileType = file.type;
+            const fileSize = (file.size / 1024 / 1024).toFixed(2); // Ukuran dalam MB
+
+            let messageContent = `Nama File: ${fileName}\n`;
+            messageContent += `Ukuran: ${fileSize} MB\n`;
+            messageContent += `Tipe: ${fileType}\n\n`;
+            messageContent += `File ini akan dikirim ke endpoint POST:\n${targetUrl}`;
+
+            let imageUrl = null;
+            if (fileType.startsWith("image/")) {
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                imageUrl = e.target.result;
+                showMessageModal(
+                  "Detail File yang Dipilih",
+                  messageContent,
+                  imageUrl
+                );
+                displayFileInCard(fileName, fileType, fileSize, imageUrl); // Tampilkan di kartu juga
+              };
+              reader.readAsDataURL(file);
+            } else {
+              showMessageModal("Detail File yang Dipilih", messageContent);
+              displayFileInCard(fileName, fileType, fileSize); // Tampilkan di kartu
+            }
+
+            // Contoh bagaimana Anda akan mengirim file menggunakan Fetch API:
+            /*
+                    const formData = new FormData();
+                    formData.append('file', file);
+
+                    fetch(targetUrl, {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('Sukses:', data);
+                        showMessageModal('Sukses', 'File berhasil diunggah!');
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        showMessageModal('Error', 'Terjadi kesalahan saat mengunggah file.');
+                    });
+                    */
+          } else {
+            showMessageModal(
+              "Peringatan",
+              "Harap pilih file terlebih dahulu sebelum mengirim."
+            );
+            displayFileCard.classList.add("hidden"); // Sembunyikan kartu jika tidak ada file
+          }
+        });
+
+        // Event listener untuk tombol tutup modal
+        closeModalButton.addEventListener("click", hideMessageModal);
+
+        // Menutup modal saat mengklik di luar area modal
+        messageModal.addEventListener("click", (event) => {
+          if (event.target === messageModal) {
+            hideMessageModal();
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

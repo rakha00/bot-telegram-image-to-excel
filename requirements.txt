@@ -5,6 +5,8 @@ pdfplumber
 pandas
 openpyxl
 python-docx
+werkzeug
+requests
 # Library untuk Google Gemini
 google-generativeai
 Pillow
