@@ -1,60 +1,90 @@
 """
-Modul untuk mengekstrak tabel dari gambar menggunakan Google Gemini Vision API,
-dan mengubahnya menjadi JSON mentah.
+Modul untuk mengekstrak tabel keuangan dari file PDF menggunakan Google Gemini Vision API
+dan mengubahnya menjadi JSON terstruktur.
 """
 import os
+import json
 import google.generativeai as genai
+import fitz  # PyMuPDF
 import PIL.Image
-import asyncio
 
 def configure_gemini():
     """Konfigurasi Gemini API dengan kunci dari environment variables."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise ValueError("GEMINI_API_KEY tidak ditemukan di file .env")
+        raise ValueError("GEMINI_API_KEY tidak ditemukan di environment variables.")
     genai.configure(api_key=api_key)
 
-def generate_gemini_prompt():
+def generate_financial_statement_prompt():
+    """Menghasilkan prompt yang disesuaikan untuk mengekstrak neraca keuangan."""
     return """
-    UBAH GAMBAR TABEL INI MENJADI JSON ARRAY OF OBJECTS (ARRAY BERISI DICTIONARY).
-    - Baris pertama tabel adalah header/kolom, gunakan sebagai key di setiap object.
-    - Setiap baris berikutnya adalah data, gunakan header sebagai key dan isi sel sebagai value.
-    - Jika sel kosong, isi dengan null.
-    - Hanya kembalikan JSON array of objects, tanpa penjelasan, tanpa markdown, tanpa teks tambahan.
-    - Contoh:
-    [
-      {"Header1": "Data1", "Header2": null},
-      {"Header1": "Data2", "Header2": "Data3"}
-    ]
+    Anda adalah seorang analis keuangan ahli. Tugas Anda adalah mengekstrak data keuangan dari gambar neraca ("NERACA") yang disediakan.
+    Ubah tabel menjadi objek JSON yang terstruktur.
+
+    Objek JSON harus memiliki dua kunci utama: "2023" dan "2022", yang mewakili tahun-tahun tersebut.
+    Nilai setiap tahun harus berupa objek yang berisi kategori-kategori keuangan.
+
+    Ikuti struktur ini:
+    - Kunci tingkat atas harus merupakan bagian utama seperti "Aset Lancar", "Aset Tidak Lancar", "Liabilitas Jangka Pendek", "Liabilitas Jangka Panjang", dan "Ekuitas".
+    - Setiap bagian harus berisi objek di mana kunci adalah item baris (misalnya, "Kas dan setara kas", "Investasi") dan nilai adalah angka yang sesuai.
+    - Sajikan angka sebagai integer atau float, hapus semua titik yang digunakan sebagai pemisah ribuan.
+    - Jika nilai tidak ada untuk suatu tahun (misalnya, tanda hubung '-'), sajikan sebagai `null`.
+    - Gabungkan semua bagian neraca menjadi satu objek JSON untuk halaman tersebut.
+    - Hanya kembalikan objek JSON akhir, tanpa penjelasan, markdown, atau teks tambahan.
+    - Pastikan format JSON benar dan dapat di-parse.
     """
 
-async def stream_json_output(image_path: str, model_name: str = 'gemini-1.5-flash'):
+def clean_gemini_response(text: str) -> str:
+    """Membersihkan respons teks dari Gemini untuk memastikan itu adalah JSON yang valid."""
+    # Hapus markdown code block
+    if '```json' in text:
+        text = text.split('```json')[1]
+    if '```' in text:
+        text = text.split('```')[0]
+    
+    # Hapus karakter non-printable dan strip whitespace
+    return ''.join(char for char in text if char.isprintable()).strip()
+
+async def extract_json_from_pdf(pdf_path: str, model_name: str = 'gemini-1.5-flash') -> str:
     """
-    Menghasilkan hasil JSON secara streaming dari gambar tabel menggunakan Gemini Vision.
+    Mengekstrak tabel keuangan dari halaman pertama PDF dan mengembalikan string JSON.
     """
     try:
         configure_gemini()
-        model = genai.GenerativeModel(model_name)
-        prompt = generate_gemini_prompt()
-        image = PIL.Image.open(image_path)
 
-        response_stream = await model.generate_content_async([prompt, image], stream=True)
+        # Buka PDF dan ubah halaman pertama menjadi gambar menggunakan PyMuPDF
+        doc = fitz.open(pdf_path)
+        page = doc.load_page(0)  # 0 adalah indeks untuk halaman pertama
+        pix = page.get_pixmap(dpi=300)  # Tingkatkan DPI untuk kualitas gambar yang lebih baik
+        doc.close()
+
+        # Buat objek gambar PIL dari data piksel
+        image = PIL.Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         
-        async for chunk in response_stream:
-            if chunk.text:
-                print(chunk.text, end='', flush=True)
-                yield chunk.text
+        if not image:
+            return json.dumps({"error": "Gagal mengonversi PDF ke gambar."})
+        
+        model = genai.GenerativeModel(model_name)
+        prompt = generate_financial_statement_prompt()
+
+        # Hasilkan konten dari model
+        response = await model.generate_content_async([prompt, image])
+        
+        # Bersihkan dan parse respons
+        cleaned_text = clean_gemini_response(response.text)
+        
+        try:
+            # Validasi dengan memuatnya sebagai JSON
+            parsed_json = json.loads(cleaned_text)
+            # Kembalikan sebagai string JSON yang diformat dengan baik
+            return json.dumps(parsed_json, indent=2, ensure_ascii=False)
+        except json.JSONDecodeError as e:
+            print(f"JSON Decode Error: {e}")
+            return json.dumps({
+                "error": "Gagal mem-parse JSON dari respons Gemini.",
+                "raw_response": cleaned_text
+            })
 
     except Exception as e:
-        print(f"Error saat streaming dari Gemini: {e}")
-        yield ""
-
-async def get_json_output(image_path: str) -> str:
-    """
-    Processes an image and returns the full JSON output as a single string.
-    This is a helper for calling the streaming function from a synchronous context.
-    """
-    full_response = []
-    async for chunk in stream_json_output(image_path):
-        full_response.append(chunk)
-    return "".join(full_response)
+        print(f"Terjadi kesalahan di extract_json_from_pdf: {e}")
+        return json.dumps({"error": f"Gagal memproses PDF: {e}"})

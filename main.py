@@ -1,8 +1,13 @@
 import asyncio
 import json
 import os
+import uuid
+from datetime import datetime
 
-from flask import Flask, Response, abort, jsonify, request, send_from_directory
+import docx
+import pdfplumber
+from flask import (Flask, Response, abort, jsonify, render_template, request,
+                   send_from_directory)
 from werkzeug.utils import secure_filename
 
 from gemini_vision_extractor import get_json_output
@@ -12,27 +17,15 @@ app.config['JSON_SORT_KEYS'] = False
 
 # Konfigurasi path ke direktori 'output' tempat file JSON disimpan
 OUTPUT_FOLDER = 'output'
+TEMP_FILES_FOLDER = 'temp_files' # Folder sementara untuk file yang diunggah
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
+app.config['TEMP_FILES_FOLDER'] = TEMP_FILES_FOLDER
 
 @app.route('/')
 def home():
-    return "Selamat datang di API OCR Tabel! Gunakan /api/files untuk melihat daftar file JSON."
-
-@app.route('/api/files', methods=['GET'])
-def list_json_files():
-    """
-    Mengembalikan daftar semua file JSON yang tersedia di direktori output.
-    """
-    try:
-        json_files = [f for f in os.listdir(app.config['OUTPUT_FOLDER']) if f.endswith('.json')]
-        return jsonify({"files": json_files})
-    except FileNotFoundError:
-        return jsonify({"error": "Direktori output tidak ditemukan."}, 404)
-    except Exception as e:
-        return jsonify({"error": str(e)}, 500)
+    return render_template('index.html')
 
 
-# ====tools====
 def clean_value_string(value):
     """
     Membersihkan string nilai dari karakter non-numerik seperti 'Rp', '.', ',', '(', ')'.
@@ -55,341 +48,403 @@ def clean_value_string(value):
         return f"-{cleaned_value}"
     return cleaned_value
 
-import asyncio
 
-from werkzeug.utils import secure_filename
+def pdf_to_json(pdf_path):
+    """
+    Ekstrak tabel dari PDF dan konversi ke JSON array of objects.
+    Hanya mengambil tabel pertama di halaman pertama.
+    Membersihkan header dan memastikan kolom pertama bernama 'Akun'.
+    """
+    with pdfplumber.open(pdf_path) as pdf:
+        first_page = pdf.pages[0]
+        tables = first_page.extract_tables()
+        if not tables:
+            return []
+        table = tables[0]
+        
+        # Clean and prepare headers
+        raw_headers = table[0]
+        cleaned_headers = [h.strip() if h else '' for h in raw_headers]
+        
+        # Ensure the first column is named 'Akun' for consistency in mapping
+        # This assumes the first column in the PDF table is always the account description
+        if cleaned_headers:
+            # If the first header is empty or a general category (like "ASET"), rename it to "Akun"
+            # This is a heuristic based on the PDF structure for balance sheets.
+            if not cleaned_headers[0] or cleaned_headers[0].upper() in ["ASET", "LIABILITAS DAN EKUITAS", "LIABILITAS", "EKUITAS"]:
+                cleaned_headers[0] = "Akun"
+            # Otherwise, use its existing cleaned name.
+        
+        data = []
+        for row in table[1:]: # Start from the second row (skip original headers)
+            obj = {}
+            for i, cell in enumerate(row):
+                key = cleaned_headers[i] if i < len(cleaned_headers) else f"col_{i+1}"
+                obj[key] = cell if cell not in [None, ""] else None
+            data.append(obj)
+        return data
 
-from gemini_vision_extractor import get_json_output
+def docx_to_json(docx_path):
+    """
+    Ekstrak tabel dari DOCX dan konversi ke JSON array of objects.
+    Hanya mengambil tabel pertama.
+    """
+    doc = docx.Document(docx_path)
+    if not doc.tables:
+        return []
+    table = doc.tables[0]
+    rows = list(table.rows)
+    headers = [cell.text.strip() for cell in rows[0].cells]
+    data = []
+    for row in rows[1:]:
+        obj = {}
+        for i, cell in enumerate(row.cells):
+            key = headers[i] if i < len(headers) else f"col_{i+1}"
+            value = cell.text.strip()
+            obj[key] = value if value else None
+        data.append(obj)
+    return data
+
+# The fix_empty_key function is no longer strictly needed if pdf_to_json handles 'Akun' directly,
+# but keeping it for robustness in case other file types or extraction methods produce empty keys.
+def fix_empty_key(json_data, new_key="Akun"):
+    if not json_data:
+        return json_data
+    old_key = "" 
+    if isinstance(json_data, list) and len(json_data) > 0:
+        if old_key in json_data[0]:
+            for obj in json_data:
+                if isinstance(obj, dict) and old_key in obj:
+                    if new_key not in obj:
+                        obj[new_key] = obj.pop(old_key)
+    return json_data
+
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'doc', 'docx'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# =========== Syariah Laporan Keuangan ============
-@app.route('/balance-sheet/ep/syariah/laporan-keuangan', methods=['POST'])
-def get_json_file_syariah_keuangan():
-    """
-    Mengembalikan laporan JSON lengkap dengan data untuk semua tahun yang ditemukan,
-    diformat sesuai permintaan dari data JSON yang dikirim dalam body permintaan.
-    """
-    try:
-        full_data_from_file = None
-        if 'file' in request.files:
-            file = request.files['file']
-            if file and allowed_file(file.filename):
-                filename = secure_filename(file.filename)
-                temp_dir = 'temp_files'
-                os.makedirs(temp_dir, exist_ok=True)
-                file_path = os.path.join(temp_dir, filename)
-                file.save(file_path)
-                
-                # Process the file with Gemini
-                json_output = asyncio.run(get_json_output(file_path))
-                full_data_from_file = json.loads(json_output)
-
-        else:
-            full_data_from_file = request.get_json()
-
-        if not full_data_from_file:
-            return jsonify({"error": "Request body harus berisi data JSON atau file yang valid."}), 400
-        
-        # Struktur respons sesuai permintaan
-        response_payload = {
-            "status" : "SUCCESS",
-            "reason" : "Data Successfully Processed",
-            "read": []
-        }
-
-        # Peta dari nilai 'Akun' di JSON asli ke kunci yang diinginkan di output
-        # Saya telah memperbarui pemetaan ini berdasarkan contoh output yang Anda berikan
-        # dan data JSON input Anda.
-        account_to_output_key_map = {
+# --- Konfigurasi Pemetaan untuk Setiap Jenis Laporan (Disederhanakan) ---
+REPORT_CONFIGS = {
+    'laporan_keuangan': { # Satu entri untuk kedua jenis laporan keuangan (syariah & konvensional)
+        'account_to_output_key_map': {
+            # ASSET
             "Kas dan setara kas": "cash_and_cash_equivalents",
-            "Piutang bunga": "interest_receivable",
-            "Pinjaman anggota": "member_loans",
-            "Penyisihan pinjaman": "loan_loss_provision",
-            "Pinjaman koperasi lain": "loans_to_other_cooperatives",
-            "Aset tetap": "fixed_assets",
-            "Akumulasi penyusutan": "accumulated_depreciation",
-            "Aset takberwujud": "intangible_assets",
-            "Akumulasi amortisasi": "accumulated_amortization",
-            "Aset lain": "other_assets",
-            "Total aset": "total_assets",
-            "Utang bunga": "interest_payable",
+            "Pembiayaan kepada anggota": "financing_to_members",
+            "Persediaan": "inventory",
+            "Biaya dibayar dimuka dan uang muka": "prepaid_expenses_and_advances",
+            "Jumlah Aset Lancar": "total_current_assets",
+            "Investasi": "investments",
+            "Aset tetap bersih": "net_fixed_assets",
+            "Aset tidak berwujud - bersih": "net_intangible_assets",
+            "Jumlah aset tidak lancar": "total_non_current_assets",
+            "JUMLAH ASET": "total_assets",
+
+            # LIABILITIES AND EQUITY
+            "LIABILITAS": "liabilities_header",
+            "Liabilitas Jangka Pendek": "short_term_liabilities_header", # Added for clarity
             "Simpanan anggota": "member_deposits",
-            "Simpanan koperasi lain": "other_cooperative_deposits",
-            "Utang pinjaman": "loan_payable",
+            "Biaya yang masih harus dibayar": "accrued_expenses",
+            "Utang lain-lain": "other_payables",
+            "Bagian jatuh tempo satu tahun utang jangka panjang": "current_portion_long_term_debt",
+            "Utang bank": "bank_loans",
+            "Utang pembiayaan": "financing_payables",
+            "Utang pajak": "tax_payables",
+            
+            "Liabilitas Jangka Panjang": "long_term_liabilities_header",
+            "Utang kepada anggota": "payables_to_members",
+            "Utang jangka panjang setelah dikurangi bagian jatuh tempo satu tahun": "long_term_debt_net_current_portion",
             "Liabilitas imbalan kerja": "employee_benefit_liabilities",
-            "Liabilitas lain": "other_liabilities",
-            "Total liabilitas": "total_liabilities",
-            "Simpanan Pokok": "principal_savings",
-            "Simpanan Wajib": "mandatory_savings",
-            "Cadangan umum": "general_reserve",
-            "Sisa hasil usaha": "retained_earnings",
-            "Ekuitas lain": "other_equity",
-            "Total ekuitas": "total_equity",
-            "Total liabilitas dan ekuitas": "total_liabilities_and_equity",
-        }
-
-        # Urutan kunci yang diinginkan dalam objek di dalam array 'read'
-        # Ini akan menentukan urutan output JSON Anda.
-        desired_output_keys_order = [
-        "year",
-        "cash_and_cash_equivalents",
-        "interest_receivable",
-        "member_loans",
-        "loan_loss_provision",
-        "loans_to_other_cooperatives",
-        "fixed_assets",
-        "accumulated_depreciation",
-        "intangible_assets",
-        "accumulated_amortization",
-        "other_assets",
-        "total_assets",
-        "interest_payable",
-        "member_deposits",
-        "other_cooperative_deposits",
-        "loan_payable",
-        "employee_benefit_liabilities",
-        "other_liabilities",
-        "total_liabilities",
-        "principal_savings",
-        "mandatory_savings",
-        "general_reserve",
-        "retained_earnings",
-        "other_equity",
-        "total_equity",
-        "total_liabilities_and_equity"
+            "Jumlah Liabilitas Jangka Panjang": "total_long_term_liabilities",
+            "JUMLAH LIABILITAS": "total_liabilities",
+            
+            # EKUITAS
+            "EKUITAS": "equity_header",
+            "Modal Koperasi": "cooperative_capital_header", # Added for clarity
+            "Simpanan pokok": "principal_savings",
+            "Simpanan wajib": "mandatory_savings",
+            "Simpanan khusus": "special_savings",
+            "Dana cadangan": "reserve_fund",
+            "SHU yang belum dibagi": "undistributed_shu", # SHU: Sisa Hasil Usaha (Retained Earnings)
+            "Jumlah": "total_equity", # This "Jumlah" refers to total equity
+            "JUMLAH LIABILITAS DAN EKUITAS": "total_liabilities_and_equity"
+        },
+        'desired_output_keys_order': [
+            "year", 
+            # ASSET
+            "cash_and_cash_equivalents",
+            "financing_to_members",
+            "inventory",
+            "prepaid_expenses_and_advances",
+            "total_current_assets",
+            "investments",
+            "net_fixed_assets",
+            "net_intangible_assets",
+            "total_non_current_assets",
+            "total_assets",
+            
+            # LIABILITIES AND EQUITY
+            "liabilities_header",
+            "short_term_liabilities_header",
+            "member_deposits",
+            "accrued_expenses",
+            "other_payables",
+            "current_portion_long_term_debt",
+            "bank_loans",
+            "financing_payables",
+            "tax_payables",
+            "long_term_liabilities_header",
+            "payables_to_members",
+            "long_term_debt_net_current_portion",
+            "employee_benefit_liabilities",
+            "total_long_term_liabilities",
+            "total_liabilities",
+            
+            "equity_header",
+            "cooperative_capital_header",
+            "principal_savings",
+            "mandatory_savings",
+            "special_savings",
+            "reserve_fund",
+            "undistributed_shu",
+            "total_equity",
+            "total_liabilities_and_equity"
         ]
+    },
+    'laba_rugi': { # Satu entri untuk kedua jenis laba rugi (syariah & konvensional)
+        'account_to_output_key_map': {
+            "Pendapatan bunga": "interest_income",
+            "Jumlah partisipasi anggota": "member_participation",
+            "PARTISIPASI ANGGOTA": "member_participation_category",
+            "BEBAN USAHA": "operating_expenses_category",
+            "Beban penyisihan": "allowance_expense",
+            "Beban kepegawaian": "personnel_expense",
+            "Beban administrasi dan umum": "administrative_general_expenses",
+            "Beban penyusutan dan amortisasi": "depreciation_amortization_expenses",
+            "Jumlah beban usaha": "business_expense",
+            "SISA HASIL USAHA BRUTO": "remaining_profit_bruto",
+            "Hasil investasi": "investment_result",
+            "Beban perkoperasian": "cooperative_expense",
+            "PENDAPATAN & BEBAN LAIN": "other_income_expense_category",
+            "Pendapatan lain": "other_income",
+            "Beban lain": "other_expense",
+            "Sisa hasil usaha sebelum pajak": "remaining_profit_before_tax",
+            "Beban pajak penghasilan": "income_tax_expense",
+            "SISA HASIL USAHA": "remaining_profit",
+            "Penghasilan komprehensif lain": "other_comprehensive_income",
+            "PENGHASILAN KOMPREHENSIF": "comprehensive_income",
+        },
+        'desired_output_keys_order': [
+            "year", "member_participation_category", "interest_income", "member_participation",
+            "operating_expenses_category", "allowance_expense", "personnel_expense",
+            "administrative_general_expenses", "depreciation_amortization_expenses",
+            "business_expense", "remaining_profit_bruto", "investment_result",
+            "cooperative_expense", "other_income_expense_category", "other_income",
+            "other_expense", "remaining_profit_before_tax", "income_tax_expense",
+            "remaining_profit", "other_comprehensive_income", "comprehensive_income"
+        ]
+    }
+}
 
-        # Temukan semua tahun yang tersedia di data
-        available_years = set()
-        for item in full_data_from_file:
-            for key in item:
-                if key.isdigit() and len(key) == 4: # Asumsi tahun adalah 4 digit angka
-                    available_years.add(key)
+# --- Fungsi Utilitas Umum untuk Memproses Laporan ---
+async def _process_financial_report(report_category):
+    full_data_from_file = None
+    file_uploaded = False
+
+    try:
+        config = REPORT_CONFIGS[report_category]
+        account_to_output_key_map = config['account_to_output_key_map']
+        desired_output_keys_order = config['desired_output_keys_order']
+    except KeyError:
+        error_msg = f"Kategori laporan '{report_category}' tidak valid atau tidak ditemukan."
+        return {"error": error_msg}, 400
+
+    if 'file' in request.files:
+        file_uploaded = True
+        file = request.files['file']
+        if file.filename == '':
+            return {"error": "No selected file"}, 400
         
-        # Urutkan tahun secara ascending
-        sorted_years = sorted(list(available_years))
-
-        # Proses data untuk setiap tahun yang ditemukan
-        for year in sorted_years:
-            year_data_entry = {} # Inisialisasi dictionary kosong
-            temp_data_storage = {} # Simpan data sementara untuk tahun ini
-
-            # Pertama, kumpulkan semua data untuk tahun saat ini
-            for item in full_data_from_file:
-                akun_value = item.get('Akun')
-                if akun_value in account_to_output_key_map and year in item:
-                    output_key = account_to_output_key_map[akun_value]
-                    value_for_year = item.get(year)
-                    
-                    temp_data_storage[output_key] = {
-                        "value": clean_value_string(value_for_year),
-                        "conUidence": None
-                    }
+        if allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            os.makedirs(app.config['TEMP_FILES_FOLDER'], exist_ok=True)
+            file_path = os.path.join(app.config['TEMP_FILES_FOLDER'], filename)
+            file.save(file_path)
             
-            # Kedua, bangun entri data tahunan dengan urutan yang benar
-            for key in desired_output_keys_order:
-                if key == "year":
-                    year_data_entry['year'] = int(year)
-                elif key in temp_data_storage:
-                    year_data_entry[key] = temp_data_storage[key]
-                else:
-                    # Jika kunci tidak ditemukan, tambahkan dengan nilai null
-                    year_data_entry[key] = {"value": None, "conUidence": None}
+            ext = filename.rsplit('.', 1)[1].lower()
+            if ext == 'pdf':
+                full_data_from_file = pdf_to_json(file_path) # <<< PASTIKAN HANYA BARIS INI
+            elif ext in {'doc', 'docx'}:
+                full_data_from_file = docx_to_json(file_path)
+            else: # For image files, use Gemini Vision Extractor
+                json_output = await get_json_output(file_path)
+                full_data_from_file = json.loads(json_output)
             
-            response_payload["read"].append(year_data_entry)
-            
-        if not response_payload["read"]:
-            response_payload["status"] = "FAILED"
-            response_payload["reason"] = "No year data found in the data."
+            os.remove(file_path) # Hapus file sementara setelah diproses
+        else:
+            return {"error": "File type not allowed"}, 400
 
-            return Response(json.dumps(response_payload, sort_keys=False), mimetype='application/json', status=404)
+    elif request.is_json and not file_uploaded: # Only process JSON body if no file was uploaded
+        full_data_from_file = request.get_json()
+    else:
+        return {
+            "error": "Unsupported Media Type. Please upload a file using 'form-data' with a 'file' key, or provide a JSON body with 'Content-Type: application/json'."
+        }, 415
 
-        # Explicitly create the final dictionary to ensure key order.
-        # This is the most reliable way to control the output structure.
-        final_response = {
-            "status": response_payload["status"],
-            "reason": response_payload["reason"],
-            "read": response_payload["read"]
-        }
-        # Use json.dumps with sort_keys=False and return a raw Response object
-        # to have full control over the output format and prevent any reordering by jsonify.
-        return Response(json.dumps(final_response, sort_keys=False), mimetype='application/json')
+    if not full_data_from_file:
+        return {"error": "Request must contain either a valid file or JSON data."}, 400
+
+    elif request.is_json and not file_uploaded: # Only process JSON body if no file was uploaded
+        full_data_from_file = request.get_json()
+    else:
+        return {
+            "error": "Unsupported Media Type. Please upload a file using 'form-data' with a 'file' key, or provide a JSON body with 'Content-Type: application/json'."
+        }, 415
+
+    if not full_data_from_file:
+        return {"error": "Request must contain either a valid file or JSON data."}, 400
+    
+    response_payload = {
+        "status" : "SUCCESS",
+        "reason" : "Data Successfully Processed",
+        "read": []
+    }
+
+    available_years = set()
+    for item in full_data_from_file:
+        for key in item:
+            # Ensure key is a string and clean it before checking for year format
+            if isinstance(key, str):
+                cleaned_key = key.strip()
+                if cleaned_key.isdigit() and len(cleaned_key) == 4: # Asumsi tahun adalah 4 digit angka
+                    available_years.add(cleaned_key)
+    
+    sorted_years = sorted(list(available_years))
+
+    if not sorted_years: # If no years are found after cleaning
+        response_payload["status"] = "FAILED"
+        response_payload["reason"] = "No year data found in the data after cleaning headers."
+        return response_payload, 404
+
+    for year in sorted_years:
+        year_data_entry = {}
+        temp_data_storage = {}
+
+        for item in full_data_from_file:
+            akun_value = item.get('Akun')
+            # Ensure akun_value is a string and strip it for consistent matching
+            if isinstance(akun_value, str):
+                akun_value = akun_value.strip()
+
+            if akun_value in account_to_output_key_map and year in item:
+                output_key = account_to_output_key_map[akun_value]
+                value_for_year = item.get(year)
+                
+                temp_data_storage[output_key] = {
+                    "value": clean_value_string(value_for_year),
+                    "confidence": None
+                }
+            # Handle cases where 'Akun' might be null or not found for headers that are part of the map
+            # This is less likely with the new pdf_to_json, but good for robustness
+            elif akun_value is None: 
+                for mapped_akun, output_key_from_map in account_to_output_key_map.items():
+                    # If the value in the year column itself matches a mapped account name (e.g., "LIABILITAS")
+                    if item.get(year) and item.get(year).strip() == mapped_akun:
+                        temp_data_storage[output_key_from_map] = {
+                            "value": None, # Headers usually don't have numerical values
+                            "confidence": None
+                        }
+
+
+        for key in desired_output_keys_order:
+            if key == "year":
+                year_data_entry['year'] = int(year)
+            elif key in temp_data_storage:
+                year_data_entry[key] = temp_data_storage[key]
+            else:
+                year_data_entry[key] = {"value": None, "confidence": None}
+        
+        response_payload["read"].append(year_data_entry)
+        
+    if not response_payload["read"]:
+        response_payload["status"] = "FAILED"
+        response_payload["reason"] = "No data could be processed for the identified years."
+        return response_payload, 404
+
+    final_response = {
+        "status": response_payload["status"],
+        "reason": response_payload["reason"],
+        "read": response_payload["read"]
+    }
+    return final_response, 200 # Mengembalikan payload dan status HTTP
+
+# === Endpoint Baru (4 API) ===
+
+@app.route('/balance-sheet/ep/laporan-keuangan/syariah', methods=['POST'])
+async def get_json_file_laporan_keuangan_syariah():
+    try:
+        response_data, status_code = await _process_financial_report('laporan_keuangan')
+        if status_code != 200:
+            return jsonify(response_data), status_code
+        return Response(json.dumps(response_data, sort_keys=False), mimetype='application/json')
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON data in request body."}, 400)
+    except Exception as e:
+        return jsonify({"error": str(e)}, 500)
+
+@app.route('/balance-sheet/ep/laporan-keuangan/konvensional', methods=['POST'])
+async def get_json_file_laporan_keuangan_konvensional():
+    try:
+        response_data, status_code = await _process_financial_report('laporan_keuangan')
+        if status_code != 200:
+            return jsonify(response_data), status_code
+        return Response(json.dumps(response_data, sort_keys=False), mimetype='application/json')
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON data in request body."}, 400)
+    except Exception as e:
+        return jsonify({"error": str(e)}, 500)
+
+@app.route('/balance-sheet/ep/laba-rugi/syariah', methods=['POST'])
+async def get_json_file_laba_rugi_syariah():
+    try:
+        response_data, status_code = await _process_financial_report('laba_rugi')
+        if status_code != 200:
+            return jsonify(response_data), status_code
+        return Response(json.dumps(response_data, sort_keys=False), mimetype='application/json')
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON data in request body."}, 400)
+    except Exception as e:
+        return jsonify({"error": str(e)}, 500)
+
+@app.route('/balance-sheet/ep/laba-rugi/konvensional', methods=['POST'])
+async def get_json_file_laba_rugi_konvensional():
+    try:
+        response_data, status_code = await _process_financial_report('laba_rugi')
+        if status_code != 200:
+            return jsonify(response_data), status_code
+        return Response(json.dumps(response_data, sort_keys=False), mimetype='application/json')
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON data in request body."}, 400)
+    except Exception as e:
+        return jsonify({"error": str(e)}, 500)
+
+
+@app.route('/neraca', methods=['POST'])
+async def post_neraca_json():
+    try:
+        response_data, status_code = await _process_financial_report('laporan_keuangan')
+        if status_code != 200:
+            return jsonify(response_data), status_code
+        return Response(json.dumps(response_data, sort_keys=False), mimetype='application/json')
     except json.JSONDecodeError:
         return jsonify({"error": "Invalid JSON data in request body."}), 400
     except Exception as e:
         return jsonify({"error": str(e)}, 500)
 
 
-# =========== KONVESIONAL Laporan Keuangan ============
-@app.route('/balance-sheet/ep/konvesional/laporan-keuangan/<filename>', methods=['GET'])
-def get_json_file_konvesional_keuangan(filename):
-    """
-    Mengembalikan laporan JSON lengkap dengan data untuk semua tahun yang ditemukan,
-    difomrat sesuai permintaan.
-    """
-    if not filename.endswith('.json'):
-        return jsonify({"error": "Nama file harus berakhiran .json"}, 400)
-
-    file_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
-
-    if not os.path.exists(file_path):
-        return jsonify({"error": "File tidak ditemukan."}, 404)
-
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            full_data_from_file = json.load(f)
-        
-        # Struktur respons sesuai permintaan
-        response_payload = {
-            "status" : "SUCCESS",
-            "reason" : "File Successfully Read",
-            "read": []
-        }
-
-        # Peta dari nilai 'Akun' di JSON asli ke kunci yang diinginkan di output
-        # Saya telah memperbarui pemetaan ini berdasarkan contoh output yang Anda berikan
-        # dan data JSON input Anda.
-        account_to_output_key_map = {
-            "Kas dan setara kas": "cash_and_cash_equivalents",
-            "Piutang bunga": "interest_receivable",
-            "Pinjaman anggota": "member_loans",
-            "Penyisihan pinjaman": "loan_loss_provision",
-            "Pinjaman koperasi lain": "loans_to_other_cooperatives",
-            "Aset tetap": "fixed_assets",
-            "Akumulasi penyusutan": "accumulated_depreciation",
-            "Aset takberwujud": "intangible_assets",
-            "Akumulasi amortisasi": "accumulated_amortization",
-            "Aset lain": "other_assets",
-            "Total aset": "total_assets",
-            "Utang bunga": "interest_payable",
-            "Simpanan anggota": "member_deposits",
-            "Simpanan koperasi lain": "other_cooperative_deposits",
-            "Utang pinjaman": "loan_payable",
-            "Liabilitas imbalan kerja": "employee_benefit_liabilities",
-            "Liabilitas lain": "other_liabilities",
-            "Total liabilitas": "total_liabilities",
-            "Simpanan Pokok": "principal_savings",
-            "Simpanan Wajib": "mandatory_savings",
-            "Cadangan umum": "general_reserve",
-            "Sisa hasil usaha": "retained_earnings",
-            "Ekuitas lain": "other_equity",
-            "Total ekuitas": "total_equity",
-            "Total liabilitas dan ekuitas": "total_liabilities_and_equity",
-        }
-
-        # Urutan kunci yang diinginkan dalam objek di dalam array 'read'
-        # Ini akan menentukan urutan output JSON Anda.
-        desired_output_keys_order = [
-        "year",
-        "cash_and_cash_equivalents",
-        "interest_receivable",
-        "member_loans",
-        "loan_loss_provision",
-        "loans_to_other_cooperatives",
-        "fixed_assets",
-        "accumulated_depreciation",
-        "intangible_assets",
-        "accumulated_amortization",
-        "other_assets",
-        "total_assets",
-        "interest_payable",
-        "member_deposits",
-        "other_cooperative_deposits",
-        "loan_payable",
-        "employee_benefit_liabilities",
-        "other_liabilities",
-        "total_liabilities",
-        "principal_savings",
-        "mandatory_savings",
-        "general_reserve",
-        "retained_earnings",
-        "other_equity",
-        "total_equity",
-        "total_liabilities_and_equity"
-        ]
-
-        # Temukan semua tahun yang tersedia di data
-        available_years = set()
-        for item in full_data_from_file:
-            for key in item:
-                if key.isdigit() and len(key) == 4: # Asumsi tahun adalah 4 digit angka
-                    available_years.add(key)
-        
-        # Urutkan tahun secara ascending
-        sorted_years = sorted(list(available_years))
-
-        # Proses data untuk setiap tahun yang ditemukan
-        for year in sorted_years:
-            year_data_entry = {} # Inisialisasi dictionary kosong
-            temp_data_storage = {} # Simpan data sementara untuk tahun ini
-
-            # Pertama, kumpulkan semua data untuk tahun saat ini
-            for item in full_data_from_file:
-                akun_value = item.get('Akun')
-                if akun_value in account_to_output_key_map and year in item:
-                    output_key = account_to_output_key_map[akun_value]
-                    value_for_year = item.get(year)
-                    
-                    temp_data_storage[output_key] = {
-                        "value": clean_value_string(value_for_year),
-                        "conUidence": None
-                    }
-            
-            # Kedua, bangun entri data tahunan dengan urutan yang benar
-            for key in desired_output_keys_order:
-                if key == "year":
-                    year_data_entry['year'] = int(year)
-                elif key in temp_data_storage:
-                    year_data_entry[key] = temp_data_storage[key]
-                else:
-                    # Jika kunci tidak ditemukan, tambahkan dengan nilai null
-                    year_data_entry[key] = {"value": None, "conUidence": None}
-            
-            response_payload["read"].append(year_data_entry)
-            
-        if not response_payload["read"]:
-            response_payload["status"] = "FAILED"
-            response_payload["reason"] = "No year data found in the file."
-
-            return Response(json.dumps(response_payload, sort_keys=False), mimetype='application/json', status=404)
-
-        # Explicitly create the final dictionary to ensure key order.
-        # This is the most reliable way to control the output structure.
-        final_response = {
-            "status": response_payload["status"],
-            "reason": response_payload["reason"],
-            "read": response_payload["read"]
-        }
-        # Use json.dumps with sort_keys=False and return a raw Response object
-        # to have full control over the output format and prevent any reordering by jsonify.
-        return Response(json.dumps(final_response, sort_keys=False), mimetype='application/json')
-    except json.JSONDecodeError:
-        return jsonify({"error": "File bukan JSON yang valid."}, 400)
-    except Exception as e:
-        return jsonify({"error": str(e)}, 500)
-
-
-@app.route('/api/download/<filename>', methods=['GET'])
-def download_json_file(filename):
-    """
-    Mengizinkan pengguna mengunduh file JSON tertentu.
-    """
-    if not filename.endswith('.json'):
-        return jsonify({"error": "Nama file harus berakhiran .json"}, 400)
-    
-    file_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
-    if not os.path.exists(file_path):
-        abort(404) 
-    
-    return send_from_directory(app.config['OUTPUT_FOLDER'], filename, as_attachment=True)
-
-
 if __name__ == '__main__':
-    # Pastikan direktori 'output' ada
-    os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+    # Pastikan direktori 'output' dan 'temp_files' ada saat aplikasi dimulai
+    os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['TEMP_FILES_FOLDER'], exist_ok=True)
     app.run(debug=True, host='0.0.0.0', port=5000)
-

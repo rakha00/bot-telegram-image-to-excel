@@ -1,12 +1,5 @@
-Flask
-python-dotenv
 python-telegram-bot
-pdfplumber
-pandas
-openpyxl
-python-docx
-werkzeug
-requests
-# Library untuk Google Gemini
+python-dotenv
 google-generativeai
+PyMuPDF
 Pillow
