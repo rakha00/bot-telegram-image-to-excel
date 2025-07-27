@@ -25,8 +25,8 @@ def generate_financial_statement_prompt():
     Nilai setiap tahun harus berupa objek yang berisi kategori-kategori keuangan.
 
     Ikuti struktur ini:
-    - Kunci tingkat atas harus merupakan bagian utama seperti "Aset Lancar", "Aset Tidak Lancar", "Liabilitas Jangka Pendek", "Liabilitas Jangka Panjang", dan "Ekuitas".
-    - Setiap bagian harus berisi objek di mana kunci adalah item baris (misalnya, "Kas dan setara kas", "Investasi") dan nilai adalah angka yang sesuai.
+    - Kunci tingkat atas harus merupakan bagian utama seperti "aset_lancar", "aset_tidak_lancar", "liabilitas_jangka_pendek", "liabilitas_jangka_panjang", dan "ekuitas". Gunakan snake_case untuk semua kunci.
+    - Setiap bagian harus berisi objek di mana kunci adalah item baris (misalnya, "kas_dan_setara_kas", "investasi") dan nilai adalah angka yang sesuai. Gunakan snake_case untuk semua kunci.
     - Sajikan angka sebagai integer atau float, hapus semua titik yang digunakan sebagai pemisah ribuan.
     - Jika nilai tidak ada untuk suatu tahun (misalnya, tanda hubung '-'), sajikan sebagai `null`.
     - Gabungkan semua bagian neraca menjadi satu objek JSON untuk halaman tersebut.

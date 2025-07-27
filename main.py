@@ -15,6 +15,12 @@ from gemini_vision_extractor import get_json_output
 app = Flask(__name__)
 app.config['JSON_SORT_KEYS'] = False
 
+def to_snake_case(name):
+    import re
+    name = re.sub(r'[^a-zA-Z0-9_ ]', '', name) # Remove special characters except underscore and space
+    name = name.strip().replace(' ', '_')
+    return name.lower()
+
 # Konfigurasi path ke direktori 'output' tempat file JSON disimpan
 OUTPUT_FOLDER = 'output'
 TEMP_FILES_FOLDER = 'temp_files' # Folder sementara untuk file yang diunggah
@@ -79,7 +85,7 @@ def pdf_to_json(pdf_path):
         for row in table[1:]: # Start from the second row (skip original headers)
             obj = {}
             for i, cell in enumerate(row):
-                key = cleaned_headers[i] if i < len(cleaned_headers) else f"col_{i+1}"
+                key = to_snake_case(cleaned_headers[i]) if i < len(cleaned_headers) else f"col_{i+1}"
                 obj[key] = cell if cell not in [None, ""] else None
             data.append(obj)
         return data
@@ -99,7 +105,7 @@ def docx_to_json(docx_path):
     for row in rows[1:]:
         obj = {}
         for i, cell in enumerate(row.cells):
-            key = headers[i] if i < len(headers) else f"col_{i+1}"
+            key = to_snake_case(headers[i]) if i < len(headers) else f"col_{i+1}"
             value = cell.text.strip()
             obj[key] = value if value else None
         data.append(obj)
@@ -130,45 +136,45 @@ REPORT_CONFIGS = {
     'laporan_keuangan': { # Satu entri untuk kedua jenis laporan keuangan (syariah & konvensional)
         'account_to_output_key_map': {
             # ASSET
-            "Kas dan setara kas": "cash_and_cash_equivalents",
-            "Pembiayaan kepada anggota": "financing_to_members",
-            "Persediaan": "inventory",
-            "Biaya dibayar dimuka dan uang muka": "prepaid_expenses_and_advances",
-            "Jumlah Aset Lancar": "total_current_assets",
-            "Investasi": "investments",
-            "Aset tetap bersih": "net_fixed_assets",
-            "Aset tidak berwujud - bersih": "net_intangible_assets",
-            "Jumlah aset tidak lancar": "total_non_current_assets",
-            "JUMLAH ASET": "total_assets",
+            "kas_dan_setara_kas": "cash_and_cash_equivalents",
+            "pembiayaan_kepada_anggota": "financing_to_members",
+            "persediaan": "inventory",
+            "biaya_dibayar_dimuka_dan_uang_muka": "prepaid_expenses_and_advances",
+            "jumlah_aset_lancar": "total_current_assets",
+            "investasi": "investments",
+            "aset_tetap_bersih": "net_fixed_assets",
+            "aset_tidak_berwujud_bersih": "net_intangible_assets",
+            "jumlah_aset_tidak_lancar": "total_non_current_assets",
+            "jumlah_aset": "total_assets",
 
             # LIABILITIES AND EQUITY
-            "LIABILITAS": "liabilities_header",
-            "Liabilitas Jangka Pendek": "short_term_liabilities_header", # Added for clarity
-            "Simpanan anggota": "member_deposits",
-            "Biaya yang masih harus dibayar": "accrued_expenses",
-            "Utang lain-lain": "other_payables",
-            "Bagian jatuh tempo satu tahun utang jangka panjang": "current_portion_long_term_debt",
-            "Utang bank": "bank_loans",
-            "Utang pembiayaan": "financing_payables",
-            "Utang pajak": "tax_payables",
+            "liabilitas": "liabilities_header",
+            "liabilitas_jangka_pendek": "short_term_liabilities_header", # Added for clarity
+            "simpanan_anggota": "member_deposits",
+            "biaya_yang_masih_harus_dibayar": "accrued_expenses",
+            "utang_lain_lain": "other_payables",
+            "bagian_jatuh_tempo_satu_tahun_utang_jangka_panjang": "current_portion_long_term_debt",
+            "utang_bank": "bank_loans",
+            "utang_pembiayaan": "financing_payables",
+            "utang_pajak": "tax_payables",
             
-            "Liabilitas Jangka Panjang": "long_term_liabilities_header",
-            "Utang kepada anggota": "payables_to_members",
-            "Utang jangka panjang setelah dikurangi bagian jatuh tempo satu tahun": "long_term_debt_net_current_portion",
-            "Liabilitas imbalan kerja": "employee_benefit_liabilities",
-            "Jumlah Liabilitas Jangka Panjang": "total_long_term_liabilities",
-            "JUMLAH LIABILITAS": "total_liabilities",
+            "liabilitas_jangka_panjang": "long_term_liabilities_header",
+            "utang_kepada_anggota": "payables_to_members",
+            "utang_jangka_panjang_setelah_dikurangi_bagian_jatuh_tempo_satu_tahun": "long_term_debt_net_current_portion",
+            "liabilitas_imbalan_kerja": "employee_benefit_liabilities",
+            "jumlah_liabilitas_jangka_panjang": "total_long_term_liabilities",
+            "jumlah_liabilitas": "total_liabilities",
             
             # EKUITAS
-            "EKUITAS": "equity_header",
-            "Modal Koperasi": "cooperative_capital_header", # Added for clarity
-            "Simpanan pokok": "principal_savings",
-            "Simpanan wajib": "mandatory_savings",
-            "Simpanan khusus": "special_savings",
-            "Dana cadangan": "reserve_fund",
-            "SHU yang belum dibagi": "undistributed_shu", # SHU: Sisa Hasil Usaha (Retained Earnings)
-            "Jumlah": "total_equity", # This "Jumlah" refers to total equity
-            "JUMLAH LIABILITAS DAN EKUITAS": "total_liabilities_and_equity"
+            "ekuitas": "equity_header",
+            "modal_koperasi": "cooperative_capital_header", # Added for clarity
+            "simpanan_pokok": "principal_savings",
+            "simpanan_wajib": "mandatory_savings",
+            "simpanan_khusus": "special_savings",
+            "dana_cadangan": "reserve_fund",
+            "shu_yang_belum_dibagi": "undistributed_shu", # SHU: Sisa Hasil Usaha (Retained Earnings)
+            "jumlah": "total_equity", # This "Jumlah" refers to total equity
+            "jumlah_liabilitas_dan_ekuitas": "total_liabilities_and_equity"
         },
         'desired_output_keys_order': [
             "year", 
