@@ -36,10 +36,9 @@ app = Flask(__name__)
 # PENTING: Jangan hardcode API key di kode produksi. Gunakan variabel lingkungan!
 # Contoh: os.getenv("GEMINI_API_KEY")
 # Untuk tujuan demonstrasi, ini akan disisipkan di sini.
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") 
-
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 gemini_model = None
-if GEMINI_API_KEY and 'genai' in globals(): # Pastikan pustaka genai berhasil diimpor
+if GEMINI_API_KEY and 'genai' in globals():
     try:
         # Gunakan model yang sering tersedia dan cocok untuk generateContent
         # Ganti 'gemini-1.5-flash-latest' jika 'check_models.py' menunjukkan nama lain
