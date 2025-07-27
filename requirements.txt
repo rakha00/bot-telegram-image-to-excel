@@ -3,3 +3,4 @@ python-dotenv
 google-generativeai
 PyMuPDF
 Pillow
+//pip install -q -U google-genai
